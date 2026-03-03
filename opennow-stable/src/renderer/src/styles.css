@@ -2210,6 +2210,13 @@ button.game-card-store-chip.active:hover {
   object-fit: contain; display: block;
   position: relative; z-index: 1;
   outline: none;
+  cursor: default; /* Show default cursor - user wants to see Windows cursor */
+}
+
+/* Hide cursor only when pointer lock is active (user is controlling the game) */
+.sv-video:active,
+.sv-video:focus:active {
+  cursor: none;
 }
 .sv-video:focus,
 .sv-video:focus-visible {
