@@ -10,6 +10,7 @@ import type {
   EntitledResolution,
   MicrophoneMode,
   PingResult,
+  GameLanguage,
 } from "@shared/gfn";
 import { colorQualityRequiresHevc } from "@shared/gfn";
 import { formatShortcutForDisplay, normalizeShortcut } from "../shortcuts";
@@ -69,12 +70,46 @@ const shortcutDefaults = {
   shortcutStopStream: "Ctrl+Shift+Q",
   shortcutToggleAntiAfk: "Ctrl+Shift+K",
   shortcutToggleMicrophone: "Ctrl+Shift+M",
+  shortcutScreenshot: "F11",
 } as const;
 
 const microphoneModeOptions: Array<{ value: MicrophoneMode; label: string }> = [
   { value: "disabled", label: "Disabled" },
   { value: "push-to-talk", label: "Push-to-Talk" },
   { value: "voice-activity", label: "Voice Activity" },
+];
+
+const gameLanguageOptions: Array<{ value: GameLanguage; label: string }> = [
+  { value: "en_US", label: "English (US)" },
+  { value: "en_GB", label: "English (UK)" },
+  { value: "de_DE", label: "Deutsch" },
+  { value: "fr_FR", label: "Français" },
+  { value: "es_ES", label: "Español (ES)" },
+  { value: "es_MX", label: "Español (MX)" },
+  { value: "it_IT", label: "Italiano" },
+  { value: "pt_PT", label: "Português (PT)" },
+  { value: "pt_BR", label: "Português (BR)" },
+  { value: "ru_RU", label: "Русский" },
+  { value: "pl_PL", label: "Polski" },
+  { value: "tr_TR", label: "Türkçe" },
+  { value: "ar_SA", label: "العربية" },
+  { value: "ja_JP", label: "日本語" },
+  { value: "ko_KR", label: "한국어" },
+  { value: "zh_CN", label: "简体中文" },
+  { value: "zh_TW", label: "繁體中文" },
+  { value: "th_TH", label: "ไทย" },
+  { value: "vi_VN", label: "Tiếng Việt" },
+  { value: "id_ID", label: "Bahasa Indonesia" },
+  { value: "cs_CZ", label: "Čeština" },
+  { value: "el_GR", label: "Ελληνικά" },
+  { value: "hu_HU", label: "Magyar" },
+  { value: "ro_RO", label: "Română" },
+  { value: "uk_UA", label: "Українська" },
+  { value: "nl_NL", label: "Nederlands" },
+  { value: "sv_SE", label: "Svenska" },
+  { value: "da_DK", label: "Dansk" },
+  { value: "fi_FI", label: "Suomi" },
+  { value: "no_NO", label: "Norsk" },
 ];
 
 /* ── Aspect ratio helpers ─────────────────────────────────────────── */
@@ -571,11 +606,17 @@ export function SettingsPage({ settings, regions, onSettingChange }: SettingsPag
   const [stopStreamInput, setStopStreamInput] = useState(settings.shortcutStopStream);
   const [toggleAntiAfkInput, setToggleAntiAfkInput] = useState(settings.shortcutToggleAntiAfk);
   const [toggleMicrophoneInput, setToggleMicrophoneInput] = useState(settings.shortcutToggleMicrophone);
+  const [screenshotInput, setScreenshotInput] = useState(settings.shortcutScreenshot);
   const [toggleStatsError, setToggleStatsError] = useState(false);
   const [togglePointerLockError, setTogglePointerLockError] = useState(false);
   const [stopStreamError, setStopStreamError] = useState(false);
   const [toggleAntiAfkError, setToggleAntiAfkError] = useState(false);
   const [toggleMicrophoneError, setToggleMicrophoneError] = useState(false);
+  const [screenshotError, setScreenshotError] = useState(false);
+
+  // Game language dropdown state
+  const [gameLanguageDropdownOpen, setGameLanguageDropdownOpen] = useState(false);
+  const gameLanguageDropdownRef = useRef<HTMLDivElement | null>(null);
 
   // Dynamic entitled resolutions from MES API
   const [entitledResolutions, setEntitledResolutions] = useState<EntitledResolution[]>([]);
@@ -600,6 +641,10 @@ export function SettingsPage({ settings, regions, onSettingChange }: SettingsPag
   useEffect(() => {
     setToggleMicrophoneInput(settings.shortcutToggleMicrophone);
   }, [settings.shortcutToggleMicrophone]);
+
+  useEffect(() => {
+    setScreenshotInput(settings.shortcutScreenshot);
+  }, [settings.shortcutScreenshot]);
 
   // Fetch subscription data (cached per account; reload only when account changes)
   useEffect(() => {
@@ -763,6 +808,10 @@ export function SettingsPage({ settings, regions, onSettingChange }: SettingsPag
     return found?.label || "Selected Device";
   }, [settings.microphoneDeviceId, microphoneDevices]);
 
+  const selectedGameLanguageName = useMemo(() => {
+    return gameLanguageOptions.find((option) => option.value === settings.gameLanguage)?.label ?? "English (US)";
+  }, [settings.gameLanguage]);
+
   useEffect(() => {
     if (settings.microphoneMode === "disabled") {
       setMicrophoneDeviceDropdownOpen(false);
@@ -777,6 +826,9 @@ export function SettingsPage({ settings, regions, onSettingChange }: SettingsPag
       }
       if (microphoneDeviceDropdownRef.current && !microphoneDeviceDropdownRef.current.contains(target)) {
         setMicrophoneDeviceDropdownOpen(false);
+      }
+      if (gameLanguageDropdownRef.current && !gameLanguageDropdownRef.current.contains(target)) {
+        setGameLanguageDropdownOpen(false);
       }
     };
 
@@ -814,13 +866,15 @@ export function SettingsPage({ settings, regions, onSettingChange }: SettingsPag
       && settings.shortcutTogglePointerLock === shortcutDefaults.shortcutTogglePointerLock
       && settings.shortcutStopStream === shortcutDefaults.shortcutStopStream
       && settings.shortcutToggleAntiAfk === shortcutDefaults.shortcutToggleAntiAfk
-      && settings.shortcutToggleMicrophone === shortcutDefaults.shortcutToggleMicrophone,
+      && settings.shortcutToggleMicrophone === shortcutDefaults.shortcutToggleMicrophone
+      && settings.shortcutScreenshot === shortcutDefaults.shortcutScreenshot,
     [
       settings.shortcutToggleStats,
       settings.shortcutTogglePointerLock,
       settings.shortcutStopStream,
       settings.shortcutToggleAntiAfk,
       settings.shortcutToggleMicrophone,
+      settings.shortcutScreenshot,
     ]
   );
 
@@ -830,11 +884,13 @@ export function SettingsPage({ settings, regions, onSettingChange }: SettingsPag
     setStopStreamInput(shortcutDefaults.shortcutStopStream);
     setToggleAntiAfkInput(shortcutDefaults.shortcutToggleAntiAfk);
     setToggleMicrophoneInput(shortcutDefaults.shortcutToggleMicrophone);
+    setScreenshotInput(shortcutDefaults.shortcutScreenshot);
     setToggleStatsError(false);
     setTogglePointerLockError(false);
     setStopStreamError(false);
     setToggleAntiAfkError(false);
     setToggleMicrophoneError(false);
+    setScreenshotError(false);
 
     const shortcutKeys = [
       "shortcutToggleStats",
@@ -842,6 +898,7 @@ export function SettingsPage({ settings, regions, onSettingChange }: SettingsPag
       "shortcutStopStream",
       "shortcutToggleAntiAfk",
       "shortcutToggleMicrophone",
+      "shortcutScreenshot",
     ] as const;
 
     for (const key of shortcutKeys) {
@@ -1456,6 +1513,40 @@ export function SettingsPage({ settings, regions, onSettingChange }: SettingsPag
 
             <div className="settings-row settings-row--column">
               <div className="settings-row-top">
+                <label className="settings-label">Mouse Accelerator</label>
+                <span className="settings-value-badge">{Math.round(settings.mouseAcceleration)}%</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <input
+                  type="range"
+                  className="settings-slider"
+                  min={1}
+                  max={150}
+                  step={1}
+                  value={Math.round(settings.mouseAcceleration)}
+                  onChange={(e) => handleChange("mouseAcceleration", Math.max(1, Math.min(150, Math.round(Number(e.target.value) || 1))))}
+                />
+                <input
+                  type="number"
+                  className="settings-number-input"
+                  style={{ width: 80 }}
+                  min={1}
+                  max={150}
+                  step={1}
+                  value={Math.round(settings.mouseAcceleration)}
+                  onChange={(e) => {
+                    const v = Number(e.target.value || "1");
+                    if (Number.isFinite(v)) {
+                      handleChange("mouseAcceleration", Math.max(1, Math.min(150, Math.round(v))));
+                    }
+                  }}
+                />
+              </div>
+              <span className="settings-subtle-hint">Dynamic turn boost strength (1% = off-like, 150% = strongest).</span>
+            </div>
+
+            <div className="settings-row settings-row--column">
+              <div className="settings-row-top">
                 <label className="settings-label">Shortcuts</label>
                 <div className="settings-shortcut-actions">
                   <span className="settings-value-badge">Editable</span>
@@ -1540,17 +1631,40 @@ export function SettingsPage({ settings, regions, onSettingChange }: SettingsPag
                     spellCheck={false}
                   />
                 </label>
+
+                <label className="settings-shortcut-row">
+                  <span className="settings-shortcut-label">ScreensShot</span>
+                  <input
+                    type="text"
+                    className={`settings-text-input settings-shortcut-input ${screenshotError ? "error" : ""}`}
+                    value={screenshotInput}
+                    onChange={(e) => setScreenshotInput(e.target.value)}
+                    onBlur={() => handleShortcutBlur("shortcutScreenshot", screenshotInput, setScreenshotInput, setScreenshotError)}
+                    onKeyDown={handleShortcutKeyDown}
+                    placeholder="F11"
+                    spellCheck={false}
+                  />
+                </label>
+                <label className="settings-shortcut-row">
+                  <span className="settings-shortcut-label">Toggle Settings Menu</span>
+                  <input
+                    type="text"
+                    value="Cmd+G / Ctrl+Shift+G"
+                    className="settings-text-input settings-shortcut-input settings-shortcut-input--static"
+                    disabled
+                  />
+                </label>
               </div>
 
-              {(toggleStatsError || togglePointerLockError || stopStreamError || toggleAntiAfkError || toggleMicrophoneError) && (
+              {(toggleStatsError || togglePointerLockError || stopStreamError || toggleAntiAfkError || toggleMicrophoneError || screenshotError) && (
                 <span className="settings-input-hint">
                   Invalid shortcut. Use {shortcutExamples}
                 </span>
               )}
 
-              {!toggleStatsError && !togglePointerLockError && !stopStreamError && !toggleAntiAfkError && !toggleMicrophoneError && (
+              {!toggleStatsError && !togglePointerLockError && !stopStreamError && !toggleAntiAfkError && !toggleMicrophoneError && !screenshotError && (
                 <span className="settings-shortcut-hint">
-                  {shortcutExamples}. Stop: {formatShortcutForDisplay(settings.shortcutStopStream, isMac)}. Mic: {formatShortcutForDisplay(settings.shortcutToggleMicrophone, isMac)}.
+                  {shortcutExamples}. Stop: {formatShortcutForDisplay(settings.shortcutStopStream, isMac)}. Mic: {formatShortcutForDisplay(settings.shortcutToggleMicrophone, isMac)}. ScreensShot: {formatShortcutForDisplay(settings.shortcutScreenshot, isMac)}.
                 </span>
               )}
             </div>
@@ -1576,6 +1690,52 @@ export function SettingsPage({ settings, regions, onSettingChange }: SettingsPag
                 />
                 <span className="settings-toggle-track" />
               </label>
+            </div>
+          </div>
+        </section>
+
+        {/* ── Game ───────────────────────────────────────── */}
+        <section className="settings-section">
+          <div className="settings-section-header">
+            <h2>Game</h2>
+          </div>
+          <div className="settings-rows">
+            {/* Game Language */}
+            <div className="settings-row">
+              <label className="settings-label">
+                In-Game Language
+                <span className="settings-hint">Language for in-game menus, subtitles, and audio (where supported)</span>
+              </label>
+              <div className="settings-dropdown" ref={gameLanguageDropdownRef}>
+                <button
+                  type="button"
+                  className={`settings-dropdown-selected ${gameLanguageDropdownOpen ? "open" : ""}`}
+                  onClick={() => setGameLanguageDropdownOpen((open) => !open)}
+                >
+                  <span className="settings-dropdown-selected-name">{selectedGameLanguageName}</span>
+                  <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" className={`settings-dropdown-chevron ${gameLanguageDropdownOpen ? "flipped" : ""}`}>
+                    <path d="M4.47 5.97a.75.75 0 0 1 1.06 0L8 8.44l2.47-2.47a.75.75 0 1 1 1.06 1.06l-3 3a.75.75 0 0 1-1.06 0l-3-3a.75.75 0 0 1 0-1.06Z" />
+                  </svg>
+                </button>
+                {gameLanguageDropdownOpen && (
+                  <div className="settings-dropdown-menu settings-dropdown-menu--tall">
+                    {gameLanguageOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={`settings-dropdown-item ${settings.gameLanguage === option.value ? "active" : ""}`}
+                        onClick={() => {
+                          handleChange("gameLanguage", option.value);
+                          setGameLanguageDropdownOpen(false);
+                        }}
+                      >
+                        <span>{option.label}</span>
+                        {settings.gameLanguage === option.value && <Check size={14} className="settings-dropdown-check" />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </section>

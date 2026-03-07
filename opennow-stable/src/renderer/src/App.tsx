@@ -38,6 +38,7 @@ const resolutionOptions = ["1280x720", "1920x1080", "2560x1440", "3840x2160", "2
 const fpsOptions = [30, 60, 120, 144, 240];
 const SESSION_READY_POLL_INTERVAL_MS = 2000;
 const SESSION_READY_TIMEOUT_MS = 180000;
+const PLAYTIME_RESYNC_INTERVAL_MS = 5 * 60 * 1000;
 
 type GameSource = "main" | "library" | "public";
 type AppPage = "home" | "library" | "settings";
@@ -67,6 +68,7 @@ const DEFAULT_SHORTCUTS = {
   shortcutStopStream: "Ctrl+Shift+Q",
   shortcutToggleAntiAfk: "Ctrl+Shift+K",
   shortcutToggleMicrophone: "Ctrl+Shift+M",
+  shortcutScreenshot: "F11",
 } as const;
 
 function sleep(ms: number): Promise<void> {
@@ -152,6 +154,9 @@ function defaultDiagnostics(): StreamDiagnostics {
     inputQueueMaxSchedulingDelayMs: 0,
     gpuType: "",
     serverRegion: "",
+    decoderPressureActive: false,
+    decoderRecoveryAttempts: 0,
+    decoderRecoveryAction: "none",
     micState: "uninitialized",
     micEnabled: false,
   };
@@ -182,6 +187,29 @@ function warningMessage(code: StreamTimeWarning["code"]): string {
   if (code === 1) return "Session time limit approaching";
   if (code === 2) return "Idle timeout approaching";
   return "Maximum session time approaching";
+}
+
+function formatRemainingPlaytimeFromSubscription(
+  subscription: SubscriptionInfo | null,
+  consumedHours = 0,
+): string {
+  if (!subscription) {
+    return "--";
+  }
+  if (subscription.isUnlimited) {
+    return "Unlimited";
+  }
+
+  const baseHours = Number.isFinite(subscription.remainingHours) ? subscription.remainingHours : 0;
+  const safeHours = Math.max(0, baseHours - Math.max(0, consumedHours));
+  const totalMinutes = Math.round(safeHours * 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${minutes.toString().padStart(2, "0")}m`;
+  }
+  return `${minutes}m`;
 }
 
 function toLoadingStatus(status: StreamStatus): StreamLoadingStatus {
@@ -303,11 +331,13 @@ export function App(): JSX.Element {
     region: "",
     clipboardPaste: false,
     mouseSensitivity: 1,
+    mouseAcceleration: 1,
     shortcutToggleStats: DEFAULT_SHORTCUTS.shortcutToggleStats,
     shortcutTogglePointerLock: DEFAULT_SHORTCUTS.shortcutTogglePointerLock,
     shortcutStopStream: DEFAULT_SHORTCUTS.shortcutStopStream,
     shortcutToggleAntiAfk: DEFAULT_SHORTCUTS.shortcutToggleAntiAfk,
     shortcutToggleMicrophone: DEFAULT_SHORTCUTS.shortcutToggleMicrophone,
+    shortcutScreenshot: DEFAULT_SHORTCUTS.shortcutScreenshot,
     microphoneMode: "disabled",
     microphoneDeviceId: "",
     hideStreamButtons: false,
@@ -590,16 +620,28 @@ export function App(): JSX.Element {
     const stopStream = parseWithFallback(settings.shortcutStopStream, DEFAULT_SHORTCUTS.shortcutStopStream);
     const toggleAntiAfk = parseWithFallback(settings.shortcutToggleAntiAfk, DEFAULT_SHORTCUTS.shortcutToggleAntiAfk);
     const toggleMicrophone = parseWithFallback(settings.shortcutToggleMicrophone, DEFAULT_SHORTCUTS.shortcutToggleMicrophone);
-    return { toggleStats, togglePointerLock, stopStream, toggleAntiAfk, toggleMicrophone };
+    const screenshot = parseWithFallback(settings.shortcutScreenshot, DEFAULT_SHORTCUTS.shortcutScreenshot);
+    return { toggleStats, togglePointerLock, stopStream, toggleAntiAfk, toggleMicrophone, screenshot };
   }, [
     settings.shortcutToggleStats,
     settings.shortcutTogglePointerLock,
     settings.shortcutStopStream,
     settings.shortcutToggleAntiAfk,
     settings.shortcutToggleMicrophone,
+    settings.shortcutScreenshot,
   ]);
 
   const requestEscLockedPointerCapture = useCallback(async (target: HTMLVideoElement) => {
+    const lockTarget = (target.parentElement as HTMLElement | null) ?? target;
+    const requestPointerLockCompat = async (
+      options?: { unadjustedMovement?: boolean },
+    ): Promise<void> => {
+      const maybePromise = lockTarget.requestPointerLock(options as any) as unknown;
+      if (maybePromise && typeof (maybePromise as Promise<void>).then === "function") {
+        await (maybePromise as Promise<void>);
+      }
+    };
+
     if (!document.fullscreenElement) {
       await document.documentElement.requestFullscreen().catch(() => {});
     }
@@ -611,15 +653,21 @@ export function App(): JSX.Element {
       ]).catch(() => {});
     }
 
-    await (target.requestPointerLock({ unadjustedMovement: true } as any) as unknown as Promise<void>)
+    await requestPointerLockCompat({ unadjustedMovement: true })
       .catch((err: DOMException) => {
         if (err.name === "NotSupportedError") {
-          return target.requestPointerLock();
+          return requestPointerLockCompat();
         }
         throw err;
       })
       .catch(() => {});
   }, []);
+
+  const handleRequestPointerLock = useCallback(() => {
+    if (videoRef.current) {
+      void requestEscLockedPointerCapture(videoRef.current);
+    }
+  }, [requestEscLockedPointerCapture]);
 
   const resolveExitPrompt = useCallback((confirmed: boolean) => {
     const resolver = exitPromptResolverRef.current;
@@ -682,6 +730,35 @@ export function App(): JSX.Element {
 
     return () => clearInterval(interval);
   }, [antiAfkEnabled, streamStatus]);
+
+  // Periodically re-sync subscription playtime from backend while streaming.
+  useEffect(() => {
+    if (streamStatus !== "streaming" || !authSession) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const syncPlaytime = async (): Promise<void> => {
+      try {
+        await loadSubscriptionInfo(authSession);
+      } catch (error) {
+        if (!cancelled) {
+          console.warn("Failed to re-sync subscription playtime:", error);
+        }
+      }
+    };
+
+    void syncPlaytime();
+    const timer = window.setInterval(() => {
+      void syncPlaytime();
+    }, PLAYTIME_RESYNC_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [authSession, loadSubscriptionInfo, streamStatus]);
 
   // Restore focus to video element when navigating away from Settings during streaming
   useEffect(() => {
@@ -767,6 +844,7 @@ export function App(): JSX.Element {
               microphoneMode: settings.microphoneMode,
               microphoneDeviceId: settings.microphoneDeviceId || undefined,
               mouseSensitivity: settings.mouseSensitivity,
+              mouseAcceleration: settings.mouseAcceleration,
               onLog: (line: string) => console.log(`[WebRTC] ${line}`),
               onStats: (stats) => setDiagnostics(stats),
               onEscHoldProgress: (visible, progress) => {
@@ -834,7 +912,36 @@ export function App(): JSX.Element {
         // ignore
       }
     }
+    if (key === "mouseAcceleration") {
+      try {
+        (clientRef.current as any)?.setMouseAccelerationPercent?.(value as number);
+      } catch {
+        // ignore
+      }
+    }
+    if (key === "maxBitrateMbps") {
+      try {
+        void (clientRef.current as any)?.setMaxBitrateKbps?.((value as number) * 1000);
+      } catch {
+        // ignore
+      }
+    }
   }, [settingsLoaded]);
+
+  const handleMouseSensitivityChange = useCallback((value: number) => {
+    void updateSetting("mouseSensitivity", value);
+  }, [updateSetting]);
+
+  const handleMouseAccelerationChange = useCallback((value: number) => {
+    void updateSetting("mouseAcceleration", value);
+  }, [updateSetting]);
+
+  const handleMicrophoneModeChange = useCallback((value: import("@shared/gfn").MicrophoneMode) => {
+    // Keep UI responsive while still surfacing persistence failures.
+    void updateSetting("microphoneMode", value).catch((error) => {
+      console.warn("Failed to persist microphone mode setting:", error);
+    });
+  }, [updateSetting]);
 
   // Login handler
   const handleLogin = useCallback(async () => {
@@ -959,6 +1066,7 @@ export function App(): JSX.Element {
         maxBitrateMbps: settings.maxBitrateMbps,
         codec: settings.codec,
         colorQuality: settings.colorQuality,
+        gameLanguage: settings.gameLanguage,
       },
     });
 
@@ -1072,6 +1180,7 @@ export function App(): JSX.Element {
           maxBitrateMbps: settings.maxBitrateMbps,
           codec: settings.codec,
           colorQuality: settings.colorQuality,
+          gameLanguage: settings.gameLanguage,
         },
       });
 
@@ -1262,6 +1371,13 @@ export function App(): JSX.Element {
 
   const releasePointerLockIfNeeded = useCallback(async () => {
     if (document.pointerLockElement) {
+      // Tell the client to suppress synthetic Escape/reactive re-acquisition
+      try {
+        // clientRef is a mutable ref to the GfnWebRtcClient instance; access runtime property
+        (clientRef.current as any).suppressNextSyntheticEscape = true;
+      } catch (e) {
+        // ignore
+      }
       document.exitPointerLock();
       setEscHoldReleaseIndicator({ visible: false, progress: 0 });
       await sleep(75);
@@ -1354,7 +1470,13 @@ export function App(): JSX.Element {
         e.stopImmediatePropagation();
         if (streamStatus === "streaming" && videoRef.current) {
           if (document.pointerLockElement === videoRef.current) {
+            try {
+              (clientRef.current as any).suppressNextSyntheticEscape = true;
+            } catch {
+              // best-effort — client may not be initialised
+            }
             document.exitPointerLock();
+            setEscHoldReleaseIndicator({ visible: false, progress: 0 });
           } else {
             void requestEscLockedPointerCapture(videoRef.current);
           }
@@ -1481,6 +1603,11 @@ export function App(): JSX.Element {
   }
 
   const showLaunchOverlay = streamStatus !== "idle" || launchError !== null;
+  const consumedHours =
+    streamStatus === "streaming"
+      ? Math.floor(sessionElapsedSeconds / 60) / 60
+      : 0;
+  const remainingPlaytimeText = formatRemainingPlaytimeFromSubscription(subscriptionInfo, consumedHours);
 
   // Show stream lifecycle (waiting/connecting/streaming/failure)
   if (showLaunchOverlay) {
@@ -1498,6 +1625,7 @@ export function App(): JSX.Element {
               togglePointerLock: formatShortcutForDisplay(settings.shortcutTogglePointerLock, isMac),
               stopStream: formatShortcutForDisplay(settings.shortcutStopStream, isMac),
               toggleMicrophone: formatShortcutForDisplay(settings.shortcutToggleMicrophone, isMac),
+              screenshot: shortcuts.screenshot.canonical,
             }}
             hideStreamButtons={settings.hideStreamButtons}
             serverRegion={session?.serverIp}
@@ -1526,6 +1654,21 @@ export function App(): JSX.Element {
             }}
             onToggleMicrophone={() => {
               clientRef.current?.toggleMicrophone();
+            }}
+            mouseSensitivity={settings.mouseSensitivity}
+            onMouseSensitivityChange={handleMouseSensitivityChange}
+            mouseAcceleration={settings.mouseAcceleration}
+            onMouseAccelerationChange={handleMouseAccelerationChange}
+            microphoneMode={settings.microphoneMode}
+            onMicrophoneModeChange={handleMicrophoneModeChange}
+            onScreenshotShortcutChange={(value) => {
+              void updateSetting("shortcutScreenshot", value);
+            }}
+            remainingPlaytimeText={remainingPlaytimeText}
+            micTrack={clientRef.current?.getMicTrack() ?? null}
+            onRequestPointerLock={handleRequestPointerLock}
+            onReleasePointerLock={() => {
+              void releasePointerLockIfNeeded();
             }}
           />
         )}

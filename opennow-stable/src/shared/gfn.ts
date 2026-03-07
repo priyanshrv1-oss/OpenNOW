@@ -4,6 +4,14 @@ export type VideoAccelerationPreference = "auto" | "hardware" | "software";
 /** Color quality (bit depth + chroma subsampling), matching Rust ColorQuality enum */
 export type ColorQuality = "8bit_420" | "8bit_444" | "10bit_420" | "10bit_444";
 
+/** Game language codes for in-game localization (sent to GFN servers) */
+export type GameLanguage =
+  | "en_US" | "en_GB" | "de_DE" | "fr_FR" | "es_ES" | "es_MX" | "it_IT"
+  | "pt_PT" | "pt_BR" | "ru_RU" | "pl_PL" | "tr_TR" | "ar_SA" | "ja_JP"
+  | "ko_KR" | "zh_CN" | "zh_TW" | "th_TH" | "vi_VN" | "id_ID" | "cs_CZ"
+  | "el_GR" | "hu_HU" | "ro_RO" | "uk_UA" | "nl_NL" | "sv_SE" | "da_DK"
+  | "fi_FI" | "no_NO";
+
 /** Helper: get CloudMatch bitDepth value (0 = 8-bit SDR, 10 = 10-bit HDR capable) */
 export function colorQualityBitDepth(cq: ColorQuality): number {
   return cq.startsWith("10bit") ? 10 : 0;
@@ -35,11 +43,13 @@ export interface Settings {
   region: string;
   clipboardPaste: boolean;
   mouseSensitivity: number;
+  mouseAcceleration: number;
   shortcutToggleStats: string;
   shortcutTogglePointerLock: string;
   shortcutStopStream: string;
   shortcutToggleAntiAfk: string;
   shortcutToggleMicrophone: string;
+  shortcutScreenshot: string;
   microphoneMode: MicrophoneMode;
   microphoneDeviceId: string;
   hideStreamButtons: boolean;
@@ -47,6 +57,8 @@ export interface Settings {
   sessionClockShowDurationSeconds: number;
   windowWidth: number;
   windowHeight: number;
+  /** In-game language setting (sent to GFN servers via languageCode parameter) */
+  gameLanguage: GameLanguage;
 }
 
 export interface LoginProvider {
@@ -199,6 +211,8 @@ export interface StreamSettings {
   maxBitrateMbps: number;
   codec: VideoCodec;
   colorQuality: ColorQuality;
+  /** In-game language setting (sent to GFN servers via languageCode parameter) */
+  gameLanguage: GameLanguage;
 }
 
 export interface SessionCreateRequest {
@@ -293,6 +307,12 @@ export interface SendAnswerRequest {
   nvstSdp?: string;
 }
 
+export interface KeyframeRequest {
+  reason: string;
+  backlogFrames: number;
+  attempt: number;
+}
+
 export type MainToRendererSignalingEvent =
   | { type: "connected" }
   | { type: "disconnected"; reason: string }
@@ -328,6 +348,7 @@ export interface OpenNowApi {
   disconnectSignaling(): Promise<void>;
   sendAnswer(input: SendAnswerRequest): Promise<void>;
   sendIceCandidate(input: IceCandidatePayload): Promise<void>;
+  requestKeyframe(input: KeyframeRequest): Promise<void>;
   onSignalingEvent(listener: (event: MainToRendererSignalingEvent) => void): () => void;
   /** Listen for F11 fullscreen toggle from main process */
   onToggleFullscreen(listener: () => void): () => void;
@@ -340,4 +361,46 @@ export interface OpenNowApi {
   exportLogs(format?: "text" | "json"): Promise<string>;
   /** Ping all regions and return latency results */
   pingRegions(regions: StreamRegion[]): Promise<PingResult[]>;
+
+  /** Persist a PNG screenshot from a renderer-generated data URL */
+  saveScreenshot(input: ScreenshotSaveRequest): Promise<ScreenshotEntry>;
+
+  /** List recent screenshots from the persistent screenshot directory */
+  listScreenshots(): Promise<ScreenshotEntry[]>;
+
+  /** Delete a screenshot from the persistent screenshot directory */
+  deleteScreenshot(input: ScreenshotDeleteRequest): Promise<void>;
+
+  /** Export a screenshot to a user-selected path */
+  saveScreenshotAs(input: ScreenshotSaveAsRequest): Promise<ScreenshotSaveAsResult>;
+
+  /** Listen for screenshot hotkey events from the main process (F11) */
+  onTriggerScreenshot(listener: () => void): () => void;
+}
+
+export interface ScreenshotSaveRequest {
+  dataUrl: string;
+  gameTitle?: string;
+}
+
+export interface ScreenshotDeleteRequest {
+  id: string;
+}
+
+export interface ScreenshotSaveAsRequest {
+  id: string;
+}
+
+export interface ScreenshotSaveAsResult {
+  saved: boolean;
+  filePath?: string;
+}
+
+export interface ScreenshotEntry {
+  id: string;
+  fileName: string;
+  filePath: string;
+  createdAtMs: number;
+  sizeBytes: number;
+  dataUrl: string;
 }

@@ -1,7 +1,7 @@
 import { app } from "electron";
 import { join } from "node:path";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import type { VideoCodec, ColorQuality, VideoAccelerationPreference, MicrophoneMode } from "@shared/gfn";
+import type { VideoCodec, ColorQuality, VideoAccelerationPreference, MicrophoneMode, GameLanguage } from "@shared/gfn";
 
 export interface Settings {
   /** Video resolution (e.g., "1920x1080") */
@@ -20,6 +20,8 @@ export interface Settings {
   clipboardPaste: boolean;
   /** Mouse sensitivity multiplier */
   mouseSensitivity: number;
+  /** Software mouse acceleration strength percentage (1-150) */
+  mouseAcceleration: number;
   /** Toggle stats overlay shortcut */
   shortcutToggleStats: string;
   /** Toggle pointer lock shortcut */
@@ -30,6 +32,8 @@ export interface Settings {
   shortcutToggleAntiAfk: string;
   /** Toggle microphone shortcut */
   shortcutToggleMicrophone: string;
+  /** Take screenshot shortcut */
+  shortcutScreenshot: string;
   /** How often to re-show the session timer while streaming (0 = off) */
   sessionClockShowEveryMinutes: number;
   /** How long the session timer stays visible when it appears */
@@ -44,6 +48,8 @@ export interface Settings {
   windowWidth: number;
   /** Window height */
   windowHeight: number;
+  /** In-game language setting (sent to GFN servers via languageCode parameter) */
+  gameLanguage: GameLanguage;
 }
 
 const defaultStopShortcut = "Ctrl+Shift+Q";
@@ -61,11 +67,13 @@ const DEFAULT_SETTINGS: Settings = {
   region: "",
   clipboardPaste: false,
   mouseSensitivity: 1,
+  mouseAcceleration: 1,
   shortcutToggleStats: "F3",
   shortcutTogglePointerLock: "F8",
   shortcutStopStream: defaultStopShortcut,
   shortcutToggleAntiAfk: defaultAntiAfkShortcut,
   shortcutToggleMicrophone: defaultMicShortcut,
+  shortcutScreenshot: "F11",
   microphoneMode: "disabled",
   microphoneDeviceId: "",
   hideStreamButtons: false,
@@ -73,6 +81,7 @@ const DEFAULT_SETTINGS: Settings = {
   sessionClockShowDurationSeconds: 30,
   windowWidth: 1400,
   windowHeight: 900,
+  gameLanguage: "en_US",
 };
 
 export class SettingsManager {
@@ -102,7 +111,15 @@ export class SettingsManager {
         ...parsed,
       };
 
-      const migrated = this.migrateLegacyShortcutDefaults(merged);
+      let migrated = this.migrateLegacyShortcutDefaults(merged);
+
+      // Migrate legacy boolean accelerator setting to percentage slider.
+      if (typeof (parsed as { mouseAcceleration?: unknown }).mouseAcceleration === "boolean") {
+        merged.mouseAcceleration = (parsed as { mouseAcceleration?: boolean }).mouseAcceleration ? 100 : 1;
+        migrated = true;
+      }
+
+      merged.mouseAcceleration = Math.max(1, Math.min(150, Math.round(merged.mouseAcceleration)));
       if (migrated) {
         writeFileSync(this.settingsPath, JSON.stringify(merged, null, 2), "utf-8");
       }

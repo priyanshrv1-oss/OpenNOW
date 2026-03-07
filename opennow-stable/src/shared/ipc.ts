@@ -20,6 +20,7 @@ export const IPC_CHANNELS = {
   DISCONNECT_SIGNALING: "gfn:disconnect-signaling",
   SEND_ANSWER: "gfn:send-answer",
   SEND_ICE_CANDIDATE: "gfn:send-ice-candidate",
+  REQUEST_KEYFRAME: "gfn:request-keyframe",
   SIGNALING_EVENT: "gfn:signaling-event",
   TOGGLE_FULLSCREEN: "window:toggle-fullscreen",
   TOGGLE_POINTER_LOCK: "window:toggle-pointer-lock",
@@ -28,6 +29,10 @@ export const IPC_CHANNELS = {
   SETTINGS_RESET: "settings:reset",
   LOGS_EXPORT: "logs:export",
   LOGS_GET_RENDERER: "logs:get-renderer",
+  SCREENSHOT_SAVE: "screenshot:save",
+  SCREENSHOT_LIST: "screenshot:list",
+  SCREENSHOT_DELETE: "screenshot:delete",
+  SCREENSHOT_SAVE_AS: "screenshot:save-as",
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

@@ -166,6 +166,11 @@ export interface StreamDiagnostics {
   gpuType: string;
   serverRegion: string;
 
+  // Decoder recovery status
+  decoderPressureActive: boolean;
+  decoderRecoveryAttempts: number;
+  decoderRecoveryAction: string;
+
   // Microphone state
   micState: MicState;
   micEnabled: boolean;
@@ -185,6 +190,8 @@ interface ClientOptions {
   microphoneDeviceId?: string;
   /** Mouse sensitivity multiplier (1.0 = default) */
   mouseSensitivity?: number;
+  /** Software acceleration strength percentage (1-150) */
+  mouseAcceleration?: number;
   onLog: (line: string) => void;
   onStats?: (stats: StreamDiagnostics) => void;
   onEscHoldProgress?: (visible: boolean, progress: number) => void;
@@ -464,6 +471,16 @@ export class GfnWebRtcClient {
   private static readonly DEFAULT_PARTIAL_RELIABLE_THRESHOLD_MS = 300;
   private static readonly RELIABLE_MOUSE_BACKPRESSURE_BYTES = 64 * 1024;
   private static readonly BACKPRESSURE_LOG_INTERVAL_MS = 2000;
+  private static readonly VIDEO_BASE_JITTER_TARGET_MS = 12;
+  private static readonly AUDIO_BASE_JITTER_TARGET_MS = 20;
+  private static readonly VIDEO_PRESSURE_JITTER_TARGET_MS = 30;
+  private static readonly AUDIO_PRESSURE_JITTER_TARGET_MS = 32;
+  private static readonly DECODER_PRESSURE_CONSECUTIVE_POLLS = 3;
+  private static readonly DECODER_STABLE_CONSECUTIVE_POLLS = 6;
+  private static readonly DECODER_RECOVERY_COOLDOWN_MS = 1500;
+  private static readonly DECODER_KEYFRAME_COOLDOWN_MS = 1200;
+  private static readonly DECODER_BITRATE_STEP_FACTOR = 0.85;
+  private static readonly DECODER_MIN_RECOVERY_BITRATE_KBPS = 4000;
 
   // Gamepad bitmap: tracks which gamepads are connected, matching official client's this.nu field.
   // Bit i (0-3) = gamepad i is connected. Sent in every gamepad packet at offset 8.
@@ -485,8 +502,8 @@ export class GfnWebRtcClient {
 
   // Track currently pressed keys (VK codes) for synthetic Escape detection
   private pressedKeys: Set<number> = new Set();
-  // Video element reference for pointer lock re-acquisition
-  private videoElement: HTMLVideoElement | null = null;
+  // Pointer lock target reference for lock re-acquisition
+  private pointerLockTarget: HTMLElement | null = null;
   // Timer for synthetic Escape on pointer lock loss
   private pointerLockEscapeTimer: number | null = null;
   // Fallback keyup if browser swallows Escape keyup while keyboard lock is active.
@@ -506,12 +523,28 @@ export class GfnWebRtcClient {
   private pendingMouseTimestampUs: bigint | null = null;
   private mouseDeltaFilter = new MouseDeltaFilter();
   private mouseSensitivity = 1;
+  private mouseAccelerationPercent = 1;
 
   private partialReliableThresholdMs = GfnWebRtcClient.DEFAULT_PARTIAL_RELIABLE_THRESHOLD_MS;
   private inputQueuePeakBufferedBytesWindow = 0;
   private inputQueueMaxSchedulingDelayMsWindow = 0;
   private inputQueuePressureLoggedAtMs = 0;
   private inputQueueDropCount = 0;
+
+  // Decoder pressure detection + recovery state.
+  private decoderPressureActive = false;
+  private decoderPressureConsecutivePolls = 0;
+  private decoderStableConsecutivePolls = 0;
+  private decoderRecoveryAttemptCount = 0;
+  private lastDecoderRecoveryAtMs = 0;
+  private lastDecoderKeyframeRequestAtMs = 0;
+  private negotiatedMaxBitrateKbps = 0;
+  private currentBitrateCeilingKbps = 0;
+  private receiverLatencyTargets = {
+    video: GfnWebRtcClient.VIDEO_BASE_JITTER_TARGET_MS,
+    audio: GfnWebRtcClient.AUDIO_BASE_JITTER_TARGET_MS,
+  };
+  private activeReceivers: Array<{ receiver: RTCRtpReceiver; kind: "audio" | "video" }> = [];
 
   // Microphone
   private micManager: MicrophoneManager | null = null;
@@ -552,6 +585,9 @@ export class GfnWebRtcClient {
     inputQueueMaxSchedulingDelayMs: 0,
     gpuType: "",
     serverRegion: "",
+    decoderPressureActive: false,
+    decoderRecoveryAttempts: 0,
+    decoderRecoveryAction: "none",
     micState: "uninitialized",
     micEnabled: false,
   };
@@ -561,6 +597,7 @@ export class GfnWebRtcClient {
     options.audioElement.srcObject = this.audioStream;
     options.audioElement.muted = true;
     this.mouseSensitivity = options.mouseSensitivity ?? 1;
+    this.mouseAccelerationPercent = Math.max(1, Math.min(150, Math.round(options.mouseAcceleration ?? 1)));
 
     // Configure video element for lowest latency playback
     this.configureVideoElementForLowLatency(options.videoElement);
@@ -616,6 +653,61 @@ export class GfnWebRtcClient {
     this.log(`Mouse sensitivity set to ${this.mouseSensitivity}`);
   }
 
+  /** Update software mouse acceleration strength at runtime (1-150%). */
+  public setMouseAccelerationPercent(value: number): void {
+    const v = Number.isFinite(value) ? value : 1;
+    this.mouseAccelerationPercent = Math.max(1, Math.min(150, Math.round(v)));
+    this.log(`Mouse acceleration set to ${this.mouseAccelerationPercent}%`);
+  }
+
+  /**
+   * Replace the b=AS bandwidth line in video sections of an SDP string.
+   * Unlike mungeAnswerSdp, this is safe to call on an already-munged SDP
+   * because it replaces the existing line rather than injecting a new one.
+   */
+  private replaceVideoBitrateInSdp(sdp: string, maxBitrateKbps: number): string {
+    const lines = sdp.split("\r\n");
+    let inVideoSection = false;
+    let bitrateReplaced = false;
+    const result: string[] = [];
+    for (const line of lines) {
+      if (line.startsWith("m=")) {
+        inVideoSection = line.startsWith("m=video");
+        bitrateReplaced = false;
+      }
+      if (inVideoSection && !bitrateReplaced && line.startsWith("b=AS:")) {
+        result.push(`b=AS:${maxBitrateKbps}`);
+        bitrateReplaced = true;
+        continue;
+      }
+      result.push(line);
+    }
+    return result.join("\r\n");
+  }
+
+  /**
+   * Update the maximum receive bitrate ceiling mid-stream by replacing b=AS
+   * in the local SDP and re-applying it. Chrome/Electron honours this change
+   * without requiring a full ICE renegotiation.
+   */
+  public async setMaxBitrateKbps(kbps: number): Promise<void> {
+    if (!this.pc || !this.pc.localDescription) {
+      return;
+    }
+    const updatedSdp = this.replaceVideoBitrateInSdp(
+      this.pc.localDescription.sdp,
+      kbps,
+    );
+    try {
+      await this.pc.setLocalDescription(
+        new RTCSessionDescription({ type: this.pc.localDescription.type, sdp: updatedSdp }),
+      );
+      this.log(`Bitrate ceiling updated to ${kbps} kbps via local SDP`);
+    } catch (err) {
+      this.log(`setMaxBitrateKbps failed (non-fatal): ${String(err)}`);
+    }
+  }
+
   /**
    * Configure an RTCRtpReceiver for minimum jitter buffer delay.
    *
@@ -630,8 +722,14 @@ export class GfnWebRtcClient {
    *
    */
   private configureReceiverForLowLatency(receiver: RTCRtpReceiver, kind: string): void {
+    if (kind !== "video" && kind !== "audio") {
+      return;
+    }
+
+    this.registerReceiver(receiver, kind);
+
     try {
-      const targetMs = kind === "video" ? 12 : 20;
+      const targetMs = this.receiverLatencyTargets[kind];
       const rawReceiver = receiver as unknown as Record<string, unknown>;
 
       if ("jitterBufferTarget" in receiver) {
@@ -640,7 +738,7 @@ export class GfnWebRtcClient {
       }
 
       if ("playoutDelayHint" in receiver) {
-        const playoutDelaySeconds = kind === "video" ? 0.012 : 0.02;
+        const playoutDelaySeconds = targetMs / 1000;
         rawReceiver.playoutDelayHint = playoutDelaySeconds;
         this.log(`${kind} receiver: playoutDelayHint set to ${playoutDelaySeconds}s`);
       }
@@ -653,6 +751,38 @@ export class GfnWebRtcClient {
     }
   }
 
+  private registerReceiver(receiver: RTCRtpReceiver, kind: "audio" | "video"): void {
+    const alreadyRegistered = this.activeReceivers.some((entry) => entry.receiver === receiver);
+    if (!alreadyRegistered) {
+      this.activeReceivers.push({ receiver, kind });
+    }
+  }
+
+  private applyReceiverLatencyTargets(): void {
+    for (const entry of this.activeReceivers) {
+      this.configureReceiverForLowLatency(entry.receiver, entry.kind);
+    }
+  }
+
+  private setDecoderPressureMode(active: boolean): void {
+    if (this.decoderPressureActive === active) {
+      return;
+    }
+
+    this.decoderPressureActive = active;
+    this.diagnostics.decoderPressureActive = active;
+    this.receiverLatencyTargets.video = active
+      ? GfnWebRtcClient.VIDEO_PRESSURE_JITTER_TARGET_MS
+      : GfnWebRtcClient.VIDEO_BASE_JITTER_TARGET_MS;
+    this.receiverLatencyTargets.audio = active
+      ? GfnWebRtcClient.AUDIO_PRESSURE_JITTER_TARGET_MS
+      : GfnWebRtcClient.AUDIO_BASE_JITTER_TARGET_MS;
+    this.log(
+      `Decoder pressure mode ${active ? "enabled" : "cleared"}; receiver targets video=${this.receiverLatencyTargets.video}ms audio=${this.receiverLatencyTargets.audio}ms`,
+    );
+    this.applyReceiverLatencyTargets();
+  }
+
   private log(message: string): void {
     this.options.onLog(message);
   }
@@ -663,12 +793,30 @@ export class GfnWebRtcClient {
     }
   }
 
+  private resetDecoderRecoveryState(): void {
+    this.decoderPressureActive = false;
+    this.decoderPressureConsecutivePolls = 0;
+    this.decoderStableConsecutivePolls = 0;
+    this.decoderRecoveryAttemptCount = 0;
+    this.lastDecoderRecoveryAtMs = 0;
+    this.lastDecoderKeyframeRequestAtMs = 0;
+    this.negotiatedMaxBitrateKbps = 0;
+    this.currentBitrateCeilingKbps = 0;
+    this.receiverLatencyTargets.video = GfnWebRtcClient.VIDEO_BASE_JITTER_TARGET_MS;
+    this.receiverLatencyTargets.audio = GfnWebRtcClient.AUDIO_BASE_JITTER_TARGET_MS;
+    this.activeReceivers = [];
+    this.diagnostics.decoderPressureActive = false;
+    this.diagnostics.decoderRecoveryAttempts = 0;
+    this.diagnostics.decoderRecoveryAction = "none";
+  }
+
   private resetDiagnostics(): void {
     this.lastStatsSample = null;
     this.currentCodec = "";
     this.currentResolution = "";
     this.isHdr = false;
     this.videoDecodeStallWarningSent = false;
+    this.resetDecoderRecoveryState();
     this.diagnostics = {
       connectionState: this.pc?.connectionState ?? "closed",
       inputReady: false,
@@ -696,6 +844,9 @@ export class GfnWebRtcClient {
       inputQueueMaxSchedulingDelayMs: 0,
       gpuType: this.gpuType,
       serverRegion: this.serverRegion,
+      decoderPressureActive: false,
+      decoderRecoveryAttempts: 0,
+      decoderRecoveryAction: "none",
       micState: this.micState,
       micEnabled: this.micManager?.isEnabled() ?? false,
     };
@@ -773,6 +924,210 @@ export class GfnWebRtcClient {
     }
   }
 
+  private shouldTreatAsDecoderPressure(params: {
+    framesReceived: number;
+    framesDecoded: number;
+    framesDropped: number;
+    decodeTimeMs: number;
+    decodeFps: number;
+    prevSample: {
+      framesReceived: number;
+      framesDecoded: number;
+      framesDropped: number;
+    } | null;
+  }): { active: boolean; reason: string; backlogFrames: number; dropRatePercent: number } {
+    const backlogFrames = Math.max(0, params.framesReceived - params.framesDecoded);
+    const dropRatePercent = params.framesReceived > 0
+      ? (params.framesDropped / params.framesReceived) * 100
+      : 0;
+    const severeStall = params.framesReceived > 120 && params.framesDecoded === 0;
+    const backlogHigh = backlogFrames >= 45;
+    const dropRateHigh = dropRatePercent >= 6;
+
+    let dropBurst = false;
+    if (params.prevSample) {
+      const decodedDelta = params.framesDecoded - params.prevSample.framesDecoded;
+      const droppedDelta = params.framesDropped - params.prevSample.framesDropped;
+      dropBurst = droppedDelta >= 8 && decodedDelta <= 4;
+    }
+
+    let decodeSaturated = false;
+    if (params.decodeFps > 0 && params.decodeTimeMs > 0) {
+      const frameBudgetMs = 1000 / params.decodeFps;
+      decodeSaturated = params.decodeTimeMs >= frameBudgetMs * 0.82;
+    }
+
+    if (severeStall) {
+      return {
+        active: true,
+        reason: "severe_stall",
+        backlogFrames,
+        dropRatePercent,
+      };
+    }
+
+    const active = (backlogHigh && (dropRateHigh || dropBurst || decodeSaturated))
+      || (dropBurst && decodeSaturated);
+    const reason = active
+      ? (backlogHigh
+        ? "backlog_and_drop"
+        : "decode_saturated")
+      : "stable";
+
+    return {
+      active,
+      reason,
+      backlogFrames,
+      dropRatePercent,
+    };
+  }
+
+  private async requestDecoderKeyframe(backlogFrames: number, reason: string): Promise<boolean> {
+    const now = performance.now();
+    if (now - this.lastDecoderKeyframeRequestAtMs < GfnWebRtcClient.DECODER_KEYFRAME_COOLDOWN_MS) {
+      return false;
+    }
+
+    let requestedViaSender = false;
+    if (this.pc) {
+      for (const sender of this.pc.getSenders()) {
+        if (sender.track?.kind !== "video") {
+          continue;
+        }
+        const senderWithKeyframe = sender as RTCRtpSender & {
+          requestKeyFrame?: () => Promise<void>;
+        };
+        if (typeof senderWithKeyframe.requestKeyFrame !== "function") {
+          continue;
+        }
+        try {
+          await senderWithKeyframe.requestKeyFrame();
+          requestedViaSender = true;
+        } catch (error) {
+          this.log(`requestKeyFrame failed on sender (non-fatal): ${String(error)}`);
+        }
+      }
+    }
+
+    if (!requestedViaSender && this.controlChannel?.readyState === "open") {
+      try {
+        this.controlChannel.send(JSON.stringify({
+          type: "request_keyframe",
+          reason,
+          backlogFrames,
+          attempt: this.decoderRecoveryAttemptCount + 1,
+        }));
+        requestedViaSender = true;
+        this.diagnostics.decoderRecoveryAction = "control_channel_keyframe";
+      } catch (error) {
+        this.log(`control_channel keyframe request failed (non-fatal): ${String(error)}`);
+      }
+    }
+
+    if (!requestedViaSender) {
+      try {
+        await window.openNow.requestKeyframe({
+          reason,
+          backlogFrames,
+          attempt: this.decoderRecoveryAttemptCount + 1,
+        });
+        requestedViaSender = true;
+        this.diagnostics.decoderRecoveryAction = "signaling_keyframe";
+      } catch (error) {
+        this.log(`signaling keyframe request failed (non-fatal): ${String(error)}`);
+      }
+    }
+
+    if (requestedViaSender) {
+      this.lastDecoderKeyframeRequestAtMs = now;
+      if (this.diagnostics.decoderRecoveryAction === "none") {
+        this.diagnostics.decoderRecoveryAction = "sender_keyframe";
+      }
+      this.log(
+        `Decoder recovery: keyframe requested (reason=${reason}, backlog=${backlogFrames}, attempt=${this.decoderRecoveryAttemptCount + 1})`,
+      );
+      return true;
+    }
+
+    return false;
+  }
+
+  private async reduceBitrateForDecoderRecovery(): Promise<boolean> {
+    if (!this.pc || !this.pc.localDescription) {
+      return false;
+    }
+
+    const current = this.currentBitrateCeilingKbps > 0
+      ? this.currentBitrateCeilingKbps
+      : this.negotiatedMaxBitrateKbps;
+    if (current <= GfnWebRtcClient.DECODER_MIN_RECOVERY_BITRATE_KBPS) {
+      return false;
+    }
+
+    const next = Math.max(
+      GfnWebRtcClient.DECODER_MIN_RECOVERY_BITRATE_KBPS,
+      Math.floor(current * GfnWebRtcClient.DECODER_BITRATE_STEP_FACTOR),
+    );
+    if (next >= current) {
+      return false;
+    }
+
+    await this.setMaxBitrateKbps(next);
+    this.currentBitrateCeilingKbps = next;
+    this.diagnostics.decoderRecoveryAction = "bitrate_step_down";
+    this.log(`Decoder recovery: bitrate ceiling stepped down ${current} -> ${next} kbps`);
+    return true;
+  }
+
+  private async maybeRecoverFromDecoderPressure(signal: {
+    active: boolean;
+    reason: string;
+    backlogFrames: number;
+    dropRatePercent: number;
+  }): Promise<void> {
+    if (!signal.active) {
+      this.decoderPressureConsecutivePolls = 0;
+      this.decoderStableConsecutivePolls++;
+      if (this.decoderStableConsecutivePolls >= GfnWebRtcClient.DECODER_STABLE_CONSECUTIVE_POLLS) {
+        this.decoderRecoveryAttemptCount = 0;
+        this.diagnostics.decoderRecoveryAttempts = 0;
+        this.diagnostics.decoderRecoveryAction = "none";
+        this.setDecoderPressureMode(false);
+      }
+      return;
+    }
+
+    this.decoderStableConsecutivePolls = 0;
+    this.decoderPressureConsecutivePolls++;
+
+    if (this.decoderPressureConsecutivePolls < GfnWebRtcClient.DECODER_PRESSURE_CONSECUTIVE_POLLS) {
+      return;
+    }
+
+    this.setDecoderPressureMode(true);
+
+    const now = performance.now();
+    if (now - this.lastDecoderRecoveryAtMs < GfnWebRtcClient.DECODER_RECOVERY_COOLDOWN_MS) {
+      return;
+    }
+
+    const keyframeRequested = await this.requestDecoderKeyframe(signal.backlogFrames, signal.reason);
+
+    let bitrateReduced = false;
+    if (!keyframeRequested || this.decoderRecoveryAttemptCount >= 1) {
+      bitrateReduced = await this.reduceBitrateForDecoderRecovery();
+    }
+
+    if (keyframeRequested || bitrateReduced) {
+      this.decoderRecoveryAttemptCount++;
+      this.diagnostics.decoderRecoveryAttempts = this.decoderRecoveryAttemptCount;
+      this.lastDecoderRecoveryAtMs = now;
+      this.log(
+        `Decoder pressure detected: reason=${signal.reason}, backlog=${signal.backlogFrames}, dropRate=${signal.dropRatePercent.toFixed(1)}%, recoveryAttempt=${this.decoderRecoveryAttemptCount}`,
+      );
+    }
+  }
+
   private async collectStats(): Promise<void> {
     if (!this.pc) {
       return;
@@ -812,19 +1167,20 @@ export class GfnWebRtcClient {
       const framesDropped = Number(inboundVideo.framesDropped ?? 0);
       const packetsReceived = Number(inboundVideo.packetsReceived ?? 0);
       const packetsLost = Number(inboundVideo.packetsLost ?? 0);
+      const prevSample = this.lastStatsSample;
 
       // Calculate bitrate
-      if (this.lastStatsSample) {
-        const bytesDelta = bytes - this.lastStatsSample.bytesReceived;
-        const timeDeltaMs = now - this.lastStatsSample.atMs;
+      if (prevSample) {
+        const bytesDelta = bytes - prevSample.bytesReceived;
+        const timeDeltaMs = now - prevSample.atMs;
         if (bytesDelta >= 0 && timeDeltaMs > 0) {
           const kbps = (bytesDelta * 8) / (timeDeltaMs / 1000) / 1000;
           this.diagnostics.bitrateKbps = Math.max(0, Math.round(kbps));
         }
 
         // Calculate packet loss percentage over the interval
-        const packetsDelta = packetsReceived - this.lastStatsSample.packetsReceived;
-        const lostDelta = packetsLost - this.lastStatsSample.packetsLost;
+        const packetsDelta = packetsReceived - prevSample.packetsReceived;
+        const lostDelta = packetsLost - prevSample.packetsLost;
         if (packetsDelta > 0) {
           const totalPackets = packetsDelta + lostDelta;
           this.diagnostics.packetLossPercent = totalPackets > 0
@@ -933,6 +1289,16 @@ export class GfnWebRtcClient {
         const avgFrameDelay = totalInterFrameDelay / (framesDecodedForTiming - 1);
         this.diagnostics.renderTimeMs = Math.round(avgFrameDelay * 1000 * 10) / 10;
       }
+
+      const pressureSignal = this.shouldTreatAsDecoderPressure({
+        framesReceived,
+        framesDecoded,
+        framesDropped,
+        decodeTimeMs: this.diagnostics.decodeTimeMs,
+        decodeFps: this.diagnostics.decodeFps,
+        prevSample,
+      });
+      await this.maybeRecoverFromDecoderPressure(pressureSignal);
     }
 
     // RTT from active candidate pair
@@ -1513,8 +1879,18 @@ export class GfnWebRtcClient {
     }
   }
 
+  private async requestPointerLockCompat(
+    lockTarget: HTMLElement,
+    options?: { unadjustedMovement?: boolean },
+  ): Promise<void> {
+    const maybePromise = lockTarget.requestPointerLock(options as any) as unknown;
+    if (maybePromise && typeof (maybePromise as Promise<void>).then === "function") {
+      await (maybePromise as Promise<void>);
+    }
+  }
+
   private async requestPointerLockWithEscGuard(
-    videoElement: HTMLVideoElement,
+    lockTarget: HTMLElement,
     ensureFullscreen: boolean,
   ): Promise<void> {
     if (ensureFullscreen && !document.fullscreenElement) {
@@ -1528,13 +1904,13 @@ export class GfnWebRtcClient {
     await this.lockEscapeInFullscreen();
 
     try {
-      await (videoElement.requestPointerLock({ unadjustedMovement: true } as any) as unknown as Promise<void>);
+      await this.requestPointerLockCompat(lockTarget, { unadjustedMovement: true });
       this.log("Pointer lock acquired with unadjustedMovement=true (raw/unaccelerated)");
     } catch (err) {
       const domErr = err as DOMException;
       if (domErr?.name === "NotSupportedError") {
         this.log("unadjustedMovement not supported, falling back to standard pointer lock (accelerated)");
-        await videoElement.requestPointerLock();
+        await this.requestPointerLockCompat(lockTarget);
       } else {
         throw err;
       }
@@ -1588,7 +1964,7 @@ export class GfnWebRtcClient {
     }, 120);
   }
 
-  private startEscapeHoldRelease(videoElement: HTMLVideoElement): void {
+  private startEscapeHoldRelease(lockTarget: HTMLElement): void {
     if (this.escapeHoldReleaseTimer !== null) {
       return;
     }
@@ -1616,7 +1992,7 @@ export class GfnWebRtcClient {
     this.escapeHoldReleaseTimer = window.setTimeout(() => {
       this.escapeHoldReleaseTimer = null;
       this.clearEscapeHoldTimer();
-      if (document.pointerLockElement === videoElement) {
+      if (document.pointerLockElement === lockTarget) {
         this.log("Escape held for 5s, releasing pointer lock");
         this.suppressNextSyntheticEscape = true;
         // Remove Escape from pressedKeys so keyup doesn't send it to stream
@@ -1759,6 +2135,12 @@ export class GfnWebRtcClient {
   private installInputCapture(videoElement: HTMLVideoElement): void {
     this.detachInputCapture();
 
+    const pointerLockTarget = (videoElement.parentElement as HTMLElement | null) ?? videoElement;
+    const isPointerLockActive = (): boolean => {
+      const lockElement = document.pointerLockElement;
+      return lockElement === pointerLockTarget || lockElement === videoElement;
+    };
+
     const hasPointerRawUpdate = "onpointerrawupdate" in videoElement;
     const hasCoalescedEvents =
       typeof PointerEvent !== "undefined" && "getCoalescedEvents" in PointerEvent.prototype;
@@ -1839,7 +2221,7 @@ export class GfnWebRtcClient {
     this.mouseFlushTimer = window.setInterval(flushMouse, this.mouseFlushIntervalMs);
 
     const queueMouseMovement = (dx: number, dy: number, eventTimestampMs: number): void => {
-      if (!this.inputReady || document.pointerLockElement !== videoElement) {
+      if (!this.inputReady || !isPointerLockActive()) {
         return;
       }
 
@@ -1851,9 +2233,21 @@ export class GfnWebRtcClient {
         return;
       }
 
-      // Apply user-configured mouse sensitivity multiplier before queuing
-      this.pendingMouseDx += Math.round(this.mouseDeltaFilter.getX() * this.mouseSensitivity);
-      this.pendingMouseDy += Math.round(this.mouseDeltaFilter.getY() * this.mouseSensitivity);
+      // Apply user-configured sensitivity, then optional software acceleration.
+      let adjustedDx = this.mouseDeltaFilter.getX() * this.mouseSensitivity;
+      let adjustedDy = this.mouseDeltaFilter.getY() * this.mouseSensitivity;
+
+      if (this.mouseAccelerationPercent > 1) {
+        const speed = Math.hypot(adjustedDx, adjustedDy);
+        const strength = (this.mouseAccelerationPercent - 1) / 149;
+        // Gentle curve: low-speed precision, high-speed turn boost (caps at +60% at 150%).
+        const accelFactor = 1 + Math.min(0.6 * strength, (speed / 50) * strength);
+        adjustedDx *= accelFactor;
+        adjustedDy *= accelFactor;
+      }
+
+      this.pendingMouseDx += Math.round(adjustedDx);
+      this.pendingMouseDy += Math.round(adjustedDy);
       this.pendingMouseTimestampUs = timestampUs(eventTimestampMs);
     };
 
@@ -1892,13 +2286,13 @@ export class GfnWebRtcClient {
       // Keep browser from handling held keys (for example Tab focus traversal)
       // while streaming input is active.
       if (event.repeat) {
-        if (document.pointerLockElement === videoElement || mapped) {
+        if (isPointerLockActive() || mapped) {
           event.preventDefault();
         }
         return;
       }
 
-      if (document.pointerLockElement === videoElement) {
+      if (isPointerLockActive()) {
         event.preventDefault();
       }
 
@@ -1923,14 +2317,14 @@ export class GfnWebRtcClient {
       event.preventDefault();
       this.pressedKeys.add(mapped.vk);
 
-      if (mapped.vk === 0x1B && document.pointerLockElement === videoElement) {
+      if (mapped.vk === 0x1B && isPointerLockActive()) {
         // Escape with pointer lock active: we start the hold timer for hold-to-exit.
         // For a quick tap (< 5s), we send Escape on keyup (not here) so we can distinguish tap vs hold.
         // For a hold (>= 5s), pointer lock is released and we suppress sending Escape to stream.
         this.escapeTapDispatchedForCurrentHold = false;
         this.clearEscapeAutoKeyUpTimer();
         // Start the hold timer (will be cleared on keyup if released before 5s)
-        this.startEscapeHoldRelease(videoElement);
+        this.startEscapeHoldRelease(pointerLockTarget);
         // Don't send keydown yet - wait to see if this is a tap or hold
         return;
       }
@@ -2044,19 +2438,19 @@ export class GfnWebRtcClient {
 
     const onClick = () => {
       // GFN-style sequence: fullscreen -> keyboard lock (Escape) -> pointer lock.
-      void this.requestPointerLockWithEscGuard(videoElement, true).catch((err: DOMException) => {
+      void this.requestPointerLockWithEscGuard(pointerLockTarget, true).catch((err: DOMException) => {
         this.log(`Pointer lock request failed: ${err.name}: ${err.message}`);
       });
       videoElement.focus();
     };
 
-    // Store video element for pointer lock re-acquisition
-    this.videoElement = videoElement;
+    // Store lock target for pointer lock re-acquisition
+    this.pointerLockTarget = pointerLockTarget;
 
     // Handle pointer lock changes — send synthetic Escape when lock is lost by browser
     // (matches official GFN client's "pointerLockEscape" feature)
     const onPointerLockChange = () => {
-      if (document.pointerLockElement) {
+      if (isPointerLockActive()) {
         // Pointer lock gained — cancel any pending synthetic Escape
         if (this.pointerLockEscapeTimer !== null) {
           window.clearTimeout(this.pointerLockEscapeTimer);
@@ -2128,8 +2522,8 @@ export class GfnWebRtcClient {
         this.sendReliable(escUp);
 
         // Re-acquire pointer lock so the user stays in the game
-        if (this.videoElement && this.activeInputMode !== "gamepad") {
-          void this.requestPointerLockWithEscGuard(this.videoElement, false)
+        if (this.pointerLockTarget && this.activeInputMode !== "gamepad") {
+          void this.requestPointerLockWithEscGuard(this.pointerLockTarget, false)
             .catch(() => {});
         }
       }, 50);
@@ -2224,7 +2618,7 @@ export class GfnWebRtcClient {
       this.pendingMouseDy = 0;
       this.pendingMouseTimestampUs = null;
       this.mouseDeltaFilter.reset();
-      this.videoElement = null;
+      this.pointerLockTarget = null;
       // Unlock keyboard on cleanup
       const nav = navigator as any;
       if (nav.keyboard?.unlock) {
@@ -2449,6 +2843,11 @@ export class GfnWebRtcClient {
 
     const negotiatedPartialReliable = parsePartialReliableThresholdMs(offerSdp);
     this.partialReliableThresholdMs = negotiatedPartialReliable ?? GfnWebRtcClient.DEFAULT_PARTIAL_RELIABLE_THRESHOLD_MS;
+    this.negotiatedMaxBitrateKbps = Math.max(
+      GfnWebRtcClient.DECODER_MIN_RECOVERY_BITRATE_KBPS,
+      Math.floor(settings.maxBitrateKbps),
+    );
+    this.currentBitrateCeilingKbps = this.negotiatedMaxBitrateKbps;
     this.log(
       `Input channel policy: partial reliable threshold=${this.partialReliableThresholdMs}ms${negotiatedPartialReliable === null ? " (fallback)" : ""}`,
     );
@@ -2706,10 +3105,30 @@ export class GfnWebRtcClient {
     const credentials = extractIceCredentials(finalSdp);
     this.log(`Extracted ICE credentials: ufrag=${credentials.ufrag}, pwd=${credentials.pwd.slice(0, 8)}...`);
     const { width, height } = parseResolution(settings.resolution);
+    const viewportRect = this.options.videoElement.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const baseCssViewportWidth = Math.max(viewportRect.width, window.innerWidth || 0);
+    const baseCssViewportHeight = Math.max(viewportRect.height, window.innerHeight || 0);
+    const screenCssWidth = window.screen?.width ?? baseCssViewportWidth;
+    const screenCssHeight = window.screen?.height ?? baseCssViewportHeight;
+    const shouldUseScreenViewportHint = dpr > 1 && (width >= 3840 || height >= 2160);
+    const resolvedCssViewportWidth = shouldUseScreenViewportHint
+      ? Math.max(baseCssViewportWidth, screenCssWidth)
+      : baseCssViewportWidth;
+    const resolvedCssViewportHeight = shouldUseScreenViewportHint
+      ? Math.max(baseCssViewportHeight, screenCssHeight)
+      : baseCssViewportHeight;
+    const clientViewportWidth = Math.max(1, Math.round(resolvedCssViewportWidth * dpr));
+    const clientViewportHeight = Math.max(1, Math.round(resolvedCssViewportHeight * dpr));
+    this.log(
+      `Client viewport for NVST: ${clientViewportWidth}x${clientViewportHeight} (CSS base ${Math.round(baseCssViewportWidth)}x${Math.round(baseCssViewportHeight)}, screen ${Math.round(screenCssWidth)}x${Math.round(screenCssHeight)}, mode=${shouldUseScreenViewportHint ? "screen-hidpi-4k" : "window"} @ DPR ${dpr.toFixed(2)})`,
+    );
 
     const nvstSdp = buildNvstSdp({
       width,
       height,
+      clientViewportWidth,
+      clientViewportHeight,
       fps: settings.fps,
       maxBitrateKbps: settings.maxBitrateKbps,
       partialReliableThresholdMs: this.partialReliableThresholdMs,
@@ -2866,6 +3285,14 @@ export class GfnWebRtcClient {
    */
   getMicrophoneState(): MicState {
     return this.micState;
+  }
+
+  /**
+   * Return the live audio track from the microphone stream, or null if
+   * the mic has not been started or has been stopped.
+   */
+  getMicTrack(): MediaStreamTrack | null {
+    return this.micManager?.getTrack() ?? null;
   }
 
   /**
