@@ -74,23 +74,32 @@ async function normalizeIceServers(response: CloudMatchResponse): Promise<IceSer
     for (const s of servers) {
       const resolvedUrls: string[] = [];
       for (const u of s.urls) {
-        try {
+          try {
           const m = u.match(/^([a-zA-Z0-9+.-]+):([^/]+)/);
           if (m) {
             const scheme = m[1];
             const hostPort = m[2];
             const host = hostPort.split(":")[0];
             const portPart = hostPort.includes(":") ? ":" + hostPort.split(":").slice(1).join(":") : "";
-            // If host already looks like an IP, keep as-is
+
+            // Helper to bracket IPv6 literals when necessary
+            const bracketIfIpv6 = (h: string) => {
+              if (h.startsWith("[") && h.endsWith("]")) return h;
+              // Heuristic: contains ':' and is not an IPv4 dotted-quad
+              if (h.includes(":") && !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(h)) {
+                return `[${h}]`;
+              }
+              return h;
+            };
+
+            // If host already looks like an IPv4 or bracketed IPv6, keep original URL
             if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host) || /^\[[0-9a-fA-F:]+\]$/.test(host)) {
               resolvedUrls.push(u);
             } else {
               const ip = await resolveHostnameWithFallback(host);
-              if (ip) {
-                resolvedUrls.push(`${scheme}:${ip}${portPart}`);
-              } else {
-                resolvedUrls.push(u);
-              }
+              const finalHost = ip ?? host;
+              const maybeBracketted = bracketIfIpv6(finalHost);
+              resolvedUrls.push(`${scheme}:${maybeBracketted}${portPart}`);
             }
           } else {
             resolvedUrls.push(u);
@@ -113,8 +122,9 @@ async function normalizeIceServers(response: CloudMatchResponse): Promise<IceSer
     const host = parts[0];
     const port = parts.length > 1 ? `:${parts.slice(1).join(":")}` : "";
     const ip = await resolveHostnameWithFallback(host);
-    if (ip) out.push({ urls: [`stun:${ip}${port}`] });
-    else out.push({ urls: [`stun:${host}${port}`] });
+    const bracketIfIpv6 = (h: string) => (h.includes(":") && !h.startsWith("[") ? `[${h}]` : h);
+    if (ip) out.push({ urls: [`stun:${bracketIfIpv6(ip)}${port}`] });
+    else out.push({ urls: [`stun:${bracketIfIpv6(host)}${port}`] });
   }
 
   return out;
