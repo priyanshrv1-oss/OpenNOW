@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { createPortal } from "react-dom";
 import type { JSX } from "react";
 import { Maximize, Minimize, Gamepad2, Loader2, LogOut, Clock3, AlertTriangle, Mic, MicOff, Camera, ChevronLeft, ChevronRight, Save, Trash2, X, Circle, Square, Video, FolderOpen } from "lucide-react";
 import SideBar from "./SideBar";
@@ -1584,7 +1585,7 @@ export function StreamView({
         </>
       )}
 
-      {exitPrompt.open && !isConnecting && (
+      {exitPrompt.open && !isConnecting && typeof document !== "undefined" && createPortal(
         <div className="sv-exit" role="dialog" aria-modal="true" aria-label="Exit stream confirmation">
           <button
             type="button"
@@ -1611,7 +1612,8 @@ export function StreamView({
               <kbd>Enter</kbd> confirm · <kbd>Esc</kbd> cancel
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {/* Fullscreen toggle */}
