@@ -82,8 +82,8 @@ export function ControllerLibraryPage({
   games,
   isLoading,
   selectedGameId,
-  uiSoundsEnabled,
   selectedVariantByGameId,
+  uiSoundsEnabled,
   favoriteGameIds,
   onSelectGame,
   onSelectGameVariant,
@@ -214,6 +214,11 @@ export function ControllerLibraryPage({
 
   const topCategory = (TOP_CATEGORIES[categoryIndex]?.id ?? "all") as unknown as string;
 
+  useEffect(() => {
+    if (TOP_CATEGORIES.length === 0) return;
+    setCategoryIndex((prev) => Math.max(0, Math.min(prev, TOP_CATEGORIES.length - 1)));
+  }, [TOP_CATEGORIES.length]);
+
   const settingsBySubcategory = useMemo(() => {
     const micLabel = (() => {
       const id = (settings as any).microphoneDeviceId as string | undefined;
@@ -246,7 +251,7 @@ export function ControllerLibraryPage({
       ],
     } as Record<string, Array<{ id: string; label: string; value: string }>>;
   }, [settings, microphoneDevices]);
-
+ 
   const currentGameItems = useMemo(() => [
     { id: "resume", label: "Resume Game", value: "" },
     { id: "closeGame", label: "Close Game", value: "" },
@@ -331,7 +336,7 @@ export function ControllerLibraryPage({
         const step = 5; // Mbps per left/right press
         const current = settings.maxBitrateMbps ?? 75;
         if (direction === "left") {
-          const next = Math.max(1, current - step);
+          const next = Math.max(5, current - step);
           onSettingChange && onSettingChange("maxBitrateMbps" as any, next as any);
           playUiSound("move");
           return;
@@ -347,21 +352,17 @@ export function ControllerLibraryPage({
       if (direction === "left") {
         playUiSound("move");
         // Cycle main categories (settings always resets to root)
-        if (topCategory !== "current") {
-          setCategoryIndex((prev) => (prev - 1 + TOP_CATEGORIES.length) % TOP_CATEGORIES.length);
-          setSelectedSettingIndex(0);
-          setSettingsSubcategory("root");
-        }
+        setCategoryIndex((prev) => (prev - 1 + TOP_CATEGORIES.length) % TOP_CATEGORIES.length);
+        setSelectedSettingIndex(0);
+        setSettingsSubcategory("root");
         return;
       }
       if (direction === "right") {
         playUiSound("move");
         // Cycle main categories (settings always resets to root)
-        if (topCategory !== "current") {
-          setCategoryIndex((prev) => (prev + 1) % TOP_CATEGORIES.length);
-          setSelectedSettingIndex(0);
-          setSettingsSubcategory("root");
-        }
+        setCategoryIndex((prev) => (prev + 1) % TOP_CATEGORIES.length);
+        setSelectedSettingIndex(0);
+        setSettingsSubcategory("root");
         return;
       }
       if (topCategory === "current" || topCategory === "settings") {
