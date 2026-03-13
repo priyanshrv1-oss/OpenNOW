@@ -701,6 +701,16 @@ function registerIpcHandlers(): void {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.SET_FULLSCREEN, async (_event, value: boolean) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      try {
+        mainWindow.setFullScreen(Boolean(value));
+      } catch (err) {
+        console.warn("Failed to set fullscreen:", err);
+      }
+    }
+  });
+
   // Toggle pointer lock via IPC (F8 shortcut)
   ipcMain.handle(IPC_CHANNELS.TOGGLE_POINTER_LOCK, async () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -715,6 +725,17 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.SETTINGS_SET, async <K extends keyof Settings>(_event: Electron.IpcMainInvokeEvent, key: K, value: Settings[K]) => {
     settingsManager.set(key, value);
+    // React to certain setting changes immediately in main process
+    try {
+      if (key === "autoFullScreen") {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          const should = Boolean(value as unknown as boolean);
+          mainWindow.setFullScreen(should);
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to apply setting change in main process:", err);
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.SETTINGS_RESET, async (): Promise<Settings> => {

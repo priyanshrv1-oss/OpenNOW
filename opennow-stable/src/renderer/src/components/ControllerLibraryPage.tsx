@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
 import type { GameInfo, Settings } from "@shared/gfn";
 import { Star, Clock, Calendar, Repeat2 } from "lucide-react";
-import { ButtonA, ButtonX, ButtonY, ButtonPSCross, ButtonPSSquare, ButtonPSTriangle } from "./ControllerButtons";
+import { ButtonA, ButtonB, ButtonX, ButtonY, ButtonPSCross, ButtonPSCircle, ButtonPSSquare, ButtonPSTriangle } from "./ControllerButtons";
 import { getStoreDisplayName } from "./GameCard";
 import { type PlaytimeStore, formatPlaytime, formatLastPlayed } from "../utils/usePlaytime";
 
@@ -32,6 +32,7 @@ interface ControllerLibraryPageProps {
     controllerUiSounds?: boolean;
     autoLoadControllerLibrary?: boolean;
     aspectRatio?: string;
+    maxBitrateMbps?: number;
   };
   resolutionOptions?: string[];
   fpsOptions?: number[];
@@ -112,7 +113,10 @@ export function ControllerLibraryPage({
   const [time, setTime] = useState(new Date());
   const [selectedSettingIndex, setSelectedSettingIndex] = useState(0);
   const [microphoneDevices, setMicrophoneDevices] = useState<{ deviceId: string; label: string }[]>([]);
+  const [settingsSubcategory, setSettingsSubcategory] = useState<'root'|'Network'|'Audio'|'System'>('root');
+  const [lastRootSettingIndex, setLastRootSettingIndex] = useState(0);
   const [controllerType, setControllerType] = useState<"ps" | "xbox" | "nintendo" | "generic">("generic");
+  const [editingBandwidth, setEditingBandwidth] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 10000);
@@ -208,23 +212,40 @@ export function ControllerLibraryPage({
     return categories;
   }, [allGenres, currentStreamingGame]);
 
-  const topCategory = TOP_CATEGORIES[categoryIndex]?.id ?? "all";
+  const topCategory = (TOP_CATEGORIES[categoryIndex]?.id ?? "all") as unknown as string;
 
-  const settingsItems = useMemo(() => [
-    { id: "aspectRatio", label: "Aspect Ratio", value: settings.aspectRatio || "16:9" },
-    { id: "resolution", label: "Resolution", value: settings.resolution || "1920x1080" },
-    { id: "fps", label: "Frame Rate", value: `${settings.fps || 60} FPS` },
-    { id: "codec", label: "Video Codec", value: settings.codec || "H264" },
-    { id: "microphone", label: "Microphone", value: (() => {
+  const settingsBySubcategory = useMemo(() => {
+    const micLabel = (() => {
       const id = (settings as any).microphoneDeviceId as string | undefined;
       if (!id) return "Default";
       const found = microphoneDevices.find(d => d.deviceId === id);
       return found?.label ?? id;
-    })() },
-    { id: "sounds", label: "UI Sounds", value: settings.controllerUiSounds ? "On" : "Off" },
-    { id: "autoLoad", label: "Auto-Load Library", value: (settings as any).autoLoadControllerLibrary ? "On" : "Off" },
-    { id: "exit", label: "Exit Controller Mode", value: "" },
-  ], [settings, microphoneDevices]);
+    })();
+
+    return {
+      root: [
+        { id: "network", label: "Network", value: "" },
+        { id: "audio", label: "Audio", value: "" },
+        { id: "system", label: "System", value: "" },
+        { id: "exit", label: "Exit Controller Mode", value: "" },
+      ],
+      Network: [
+        { id: "resolution", label: "Resolution", value: settings.resolution || "1920x1080" },
+        { id: "fps", label: "Frame Rate", value: `${settings.fps || 60} FPS` },
+        { id: "codec", label: "Video Codec", value: settings.codec || "H264" },
+        { id: "bandwidth", label: "Bandwidth Limit", value: `${(settings.maxBitrateMbps ?? 75)} Mbps` },
+      ],
+      Audio: [
+        { id: "microphone", label: "Microphone", value: micLabel },
+        { id: "sounds", label: "UI Sounds", value: settings.controllerUiSounds ? "On" : "Off" },
+      ],
+      System: [
+        { id: "aspectRatio", label: "Aspect Ratio", value: settings.aspectRatio || "16:9" },
+        { id: "autoFullScreen", label: "Auto Full Screen", value: (settings as any).autoFullScreen ? "On" : "Off" },
+        { id: "autoLoad", label: "Auto-Load Library", value: (settings as any).autoLoadControllerLibrary ? "On" : "Off" },
+      ],
+    } as Record<string, Array<{ id: string; label: string; value: string }>>;
+  }, [settings, microphoneDevices]);
 
   const currentGameItems = useMemo(() => [
     { id: "resume", label: "Resume Game", value: "" },
@@ -233,9 +254,9 @@ export function ControllerLibraryPage({
 
   const displayItems = useMemo(() => {
     if (topCategory === "current") return currentGameItems;
-    if (topCategory === "settings") return settingsItems;
+    if (topCategory === "settings") return settingsBySubcategory[settingsSubcategory] ?? [];
     return [];
-  }, [topCategory, currentGameItems, settingsItems]);
+  }, [topCategory, currentGameItems, settingsBySubcategory, settingsSubcategory]);
 
   useEffect(() => {
     let mounted = true;
@@ -305,17 +326,42 @@ export function ControllerLibraryPage({
 
   useEffect(() => {
     const applyDirection = (direction: Direction): void => {
+      // When editing the bandwidth slider, use left/right to adjust value
+      if (topCategory === "settings" && settingsSubcategory !== "root" && editingBandwidth) {
+        const step = 5; // Mbps per left/right press
+        const current = settings.maxBitrateMbps ?? 75;
+        if (direction === "left") {
+          const next = Math.max(1, current - step);
+          onSettingChange && onSettingChange("maxBitrateMbps" as any, next as any);
+          playUiSound("move");
+          return;
+        }
+        if (direction === "right") {
+          const next = Math.min(200, current + step);
+          onSettingChange && onSettingChange("maxBitrateMbps" as any, next as any);
+          playUiSound("move");
+          return;
+        }
+      }
       if (isLoading && topCategory !== "settings" && topCategory !== "current") return;
       if (direction === "left") {
         playUiSound("move");
-        setCategoryIndex((prev) => (prev - 1 + TOP_CATEGORIES.length) % TOP_CATEGORIES.length);
-        setSelectedSettingIndex(0);
+        // Cycle main categories (settings always resets to root)
+        if (topCategory !== "current") {
+          setCategoryIndex((prev) => (prev - 1 + TOP_CATEGORIES.length) % TOP_CATEGORIES.length);
+          setSelectedSettingIndex(0);
+          setSettingsSubcategory("root");
+        }
         return;
       }
       if (direction === "right") {
         playUiSound("move");
-        setCategoryIndex((prev) => (prev + 1) % TOP_CATEGORIES.length);
-        setSelectedSettingIndex(0);
+        // Cycle main categories (settings always resets to root)
+        if (topCategory !== "current") {
+          setCategoryIndex((prev) => (prev + 1) % TOP_CATEGORIES.length);
+          setSelectedSettingIndex(0);
+          setSettingsSubcategory("root");
+        }
         return;
       }
       if (topCategory === "current" || topCategory === "settings") {
@@ -361,6 +407,12 @@ export function ControllerLibraryPage({
     };
 
     const activateHandler = () => {
+      // If currently editing bandwidth, A confirms and exits edit mode
+      if (topCategory === "settings" && settingsSubcategory !== "root" && editingBandwidth) {
+        setEditingBandwidth(false);
+        playUiSound("confirm");
+        return;
+      }
       if (topCategory === "current") {
         const item = displayItems[selectedSettingIndex];
         if (item?.id === "resume" && currentStreamingGame && onResumeGame) {
@@ -377,6 +429,21 @@ export function ControllerLibraryPage({
       }
       if (topCategory === "settings") {
         const setting = displayItems[selectedSettingIndex];
+        // Enter subcategory if at root and selecting network/audio/system
+        if (settingsSubcategory === "root" && setting && (setting.id === "network" || setting.id === "audio" || setting.id === "system")) {
+          setLastRootSettingIndex(selectedSettingIndex);
+          if (setting.id === "network") setSettingsSubcategory("Network");
+          if (setting.id === "audio") setSettingsSubcategory("Audio");
+          if (setting.id === "system") setSettingsSubcategory("System");
+          setSelectedSettingIndex(0);
+          playUiSound("confirm");
+          return;
+        }
+        // In subcategory, A toggles values like X does
+        if (settingsSubcategory !== "root") {
+          secondaryActivateHandler();
+          return;
+        }
         if (setting?.id === "exit" && onSettingChange) {
           onSettingChange("controllerMode" as any, false as any);
           playUiSound("confirm");
@@ -398,10 +465,12 @@ export function ControllerLibraryPage({
           return;
         }
         if (topCategory === "settings") {
-          // X button cycles through setting values (no-op for Exit)
+          // X button cycles through setting values (no-op for Exit or subcategory items at root)
           const setting = displayItems[selectedSettingIndex];
           if (!setting || !onSettingChange) return;
           if (setting.id === "exit") return;
+          // Skip X cycling for subcategory items at root
+          if (settingsSubcategory === "root" && (setting.id === "network" || setting.id === "audio" || setting.id === "system")) return;
 
           // Microphone device cycling
           if (setting.id === "microphone") {
@@ -441,6 +510,14 @@ export function ControllerLibraryPage({
           } else if (setting.id === "autoLoad") {
             onSettingChange("autoLoadControllerLibrary", !((settings as any).autoLoadControllerLibrary || false));
             playUiSound("move");
+          } else if (setting.id === "autoFullScreen") {
+            onSettingChange("autoFullScreen" as any, !((settings as any).autoFullScreen || false));
+            playUiSound("move");
+          }
+          else if (setting.id === "bandwidth") {
+            // Enter bandwidth edit mode so d-pad left/right adjust value
+            setEditingBandwidth(true);
+            playUiSound("move");
           }
           return;
         }
@@ -458,6 +535,21 @@ export function ControllerLibraryPage({
       }
     };
 
+    const cancelHandler = () => {
+      // Circle/B button goes back from subcategory to root
+      if (topCategory === "settings" && settingsSubcategory !== "root") {
+        if (editingBandwidth) {
+          setEditingBandwidth(false);
+          playUiSound("move");
+          return;
+        }
+        setSettingsSubcategory("root");
+        setSelectedSettingIndex(lastRootSettingIndex);
+        playUiSound("move");
+        return;
+      }
+    };
+
     const kbdHandler = (e: KeyboardEvent) => {
       if (e.repeat) return;
       if (e.key === "ArrowLeft") applyDirection("left");
@@ -465,8 +557,8 @@ export function ControllerLibraryPage({
       else if (e.key === "ArrowUp") applyDirection("up");
       else if (e.key === "ArrowDown") applyDirection("down");
       else if (e.key === "Enter") activateHandler();
-      else if (e.key.toLowerCase() === "x") secondaryActivateHandler();
       else if (e.key.toLowerCase() === "y") tertiaryActivateHandler();
+      else if (e.key.toLowerCase() === "c" || e.key.toLowerCase() === "b") cancelHandler();
       else if (e.key === "Escape") {
         if (topCategory === "current" || topCategory === "settings") {
           setCategoryIndex((prev) => (prev - 1 + TOP_CATEGORIES.length) % TOP_CATEGORIES.length);
@@ -478,17 +570,17 @@ export function ControllerLibraryPage({
 
     window.addEventListener("opennow:controller-direction", handler);
     window.addEventListener("opennow:controller-activate", activateHandler);
-    window.addEventListener("opennow:controller-secondary-activate", secondaryActivateHandler);
     window.addEventListener("opennow:controller-tertiary-activate", tertiaryActivateHandler);
+    window.addEventListener("opennow:controller-cancel", cancelHandler);
     window.addEventListener("keydown", kbdHandler);
     return () => {
       window.removeEventListener("opennow:controller-direction", handler);
       window.removeEventListener("opennow:controller-activate", activateHandler);
-      window.removeEventListener("opennow:controller-secondary-activate", secondaryActivateHandler);
       window.removeEventListener("opennow:controller-tertiary-activate", tertiaryActivateHandler);
+      window.removeEventListener("opennow:controller-cancel", cancelHandler);
       window.removeEventListener("keydown", kbdHandler);
     };
-  }, [isLoading, TOP_CATEGORIES.length, categorizedGames, selectedIndex, selectedGame, selectedVariantId, onPlayGame, onSelectGameVariant, onOpenSettings, playUiSound, throttledOnSelectGame, toggleFavoriteForSelected, topCategory, selectedSettingIndex, displayItems, settingsItems, settings, onSettingChange, resolutionOptions, fpsOptions, codecOptions, aspectRatioOptions, currentStreamingGame, onResumeGame, onCloseGame]);
+  }, [isLoading, TOP_CATEGORIES.length, categorizedGames, selectedIndex, selectedGame, selectedVariantId, onPlayGame, onSelectGameVariant, onOpenSettings, playUiSound, throttledOnSelectGame, toggleFavoriteForSelected, topCategory, selectedSettingIndex, displayItems, settings, settingsBySubcategory, settingsSubcategory, lastRootSettingIndex, onSettingChange, resolutionOptions, fpsOptions, codecOptions, aspectRatioOptions, currentStreamingGame, onResumeGame, onCloseGame, editingBandwidth]);
 
   if (isLoading && topCategory !== "settings" && topCategory !== "current") return <div className="xmb-wrapper"><div className="xmb-bg-layer"><div className="xmb-bg-gradient" /></div><div style={{display:'flex',justifyContent:'center',alignItems:'center',height:'100vh'}}>Loading...</div></div>;
 
@@ -625,13 +717,36 @@ export function ControllerLibraryPage({
       >
         {displayItems.map((item, idx) => {
           const isActive = idx === selectedSettingIndex;
+          const isSubcategoryItem = settingsSubcategory === "root" && (item.id === "network" || item.id === "audio" || item.id === "system");
           return (
-            <div key={item.id} className={`xmb-game-item ${isActive ? 'active' : ''}`}>
+            <div 
+              key={item.id} 
+              className={`xmb-game-item ${isActive ? 'active' : ''}`}
+              data-subcategory-id={isSubcategoryItem ? item.id : undefined}
+            >
               <div className="xmb-game-info">
                 <div className="xmb-game-title">{item.label}</div>
-                <div className="xmb-game-meta">
-                  <span className="xmb-game-meta-chip">{item.value}</span>
-                </div>
+                {item.value && (
+                  <div className="xmb-game-meta">
+                    {settingsSubcategory === 'Network' && item.id === 'bandwidth' ? (
+                      <div style={{display:'flex',alignItems:'center',gap:12}}>
+                        <input
+                          type="range"
+                          min={1}
+                          max={200}
+                          step={1}
+                          value={(settings.maxBitrateMbps ?? 75)}
+                          onChange={(e) => onSettingChange && onSettingChange("maxBitrateMbps" as any, Number(e.target.value) as any)}
+                          aria-label="Bandwidth Limit (Mbps)"
+                          style={editingBandwidth ? {outline: '2px solid rgba(255,255,255,0.2)'} : undefined}
+                        />
+                        <span className="xmb-game-meta-chip">{(settings.maxBitrateMbps ?? 75) >= 200 ? "Unlimited" : `${settings.maxBitrateMbps ?? 75} Mbps`}{editingBandwidth ? ' • Editing' : ''}</span>
+                      </div>
+                    ) : (
+                      <span className="xmb-game-meta-chip">{item.value}</span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -655,13 +770,34 @@ export function ControllerLibraryPage({
       <div className="xmb-footer">
         {topCategory === "current" ? (
           <>
-            <div className="xmb-btn-hint"><ButtonA className="xmb-btn-icon" size={24} /> <span>Select</span></div>
-            <div className="xmb-btn-hint" style={{flex: 1}}></div>
+            <div className="xmb-btn-hint" style={{margin: '0 auto'}}><ButtonA className="xmb-btn-icon" size={24} /> <span>Select</span></div>
           </>
         ) : topCategory === "settings" ? (
           <>
-            <div className="xmb-btn-hint"><ButtonX className="xmb-btn-icon" size={24} /> <span>Toggle</span></div>
-            <div className="xmb-btn-hint" style={{flex: 1}}></div>
+            {settingsSubcategory === "root" ? (
+              <>
+                <div className="xmb-btn-hint"><ButtonA className="xmb-btn-icon" size={24} /> <span>Enter</span></div>
+              </>
+            ) : (
+              <>
+                <div className="xmb-btn-hint">
+                  {controllerType === "ps" ? (
+                    <ButtonPSCircle className="xmb-btn-icon" size={24} />
+                  ) : (
+                    <ButtonB className="xmb-btn-icon" size={24} />
+                  )}
+                  <span>Back</span>
+                </div>
+                <div className="xmb-btn-hint">
+                  {controllerType === "ps" ? (
+                    <ButtonPSCross className="xmb-btn-icon" size={24} />
+                  ) : (
+                    <ButtonA className="xmb-btn-icon" size={24} />
+                  )}
+                  <span>Toggle</span>
+                </div>
+              </>
+            )}
           </>
         ) : (
           <>

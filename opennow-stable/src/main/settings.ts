@@ -54,6 +54,8 @@ export interface Settings {
   controllerUiSounds: boolean;
   /** Auto-load controller library at startup when controller mode is enabled */
   autoLoadControllerLibrary: boolean;
+  /** Automatically enter fullscreen when controller-mode triggers it */
+  autoFullScreen: boolean;
   favoriteGameIds: string[];
   /** Window width */
   windowWidth: number;
@@ -93,6 +95,7 @@ const DEFAULT_SETTINGS: Settings = {
   controllerMode: false,
   controllerUiSounds: false,
   autoLoadControllerLibrary: false,
+  autoFullScreen: false,
   favoriteGameIds: [],
   sessionClockShowEveryMinutes: 60,
   sessionClockShowDurationSeconds: 30,

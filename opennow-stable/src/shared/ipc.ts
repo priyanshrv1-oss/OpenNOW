@@ -23,6 +23,7 @@ export const IPC_CHANNELS = {
   REQUEST_KEYFRAME: "gfn:request-keyframe",
   SIGNALING_EVENT: "gfn:signaling-event",
   TOGGLE_FULLSCREEN: "window:toggle-fullscreen",
+  SET_FULLSCREEN: "window:set-fullscreen",
   TOGGLE_POINTER_LOCK: "window:toggle-pointer-lock",
   SETTINGS_GET: "settings:get",
   SETTINGS_SET: "settings:set",

@@ -390,6 +390,7 @@ export function App(): JSX.Element {
     controllerMode: false,
     controllerUiSounds: false,
     autoLoadControllerLibrary: false,
+    autoFullScreen: false,
     favoriteGameIds: [],
     sessionClockShowEveryMinutes: 60,
     sessionClockShowDurationSeconds: 30,
@@ -456,6 +457,7 @@ export function App(): JSX.Element {
     }
 
     if (settings.controllerMode && currentPage === "library") {
+      window.dispatchEvent(new CustomEvent("opennow:controller-cancel"));
       return true;
     }
 
@@ -1173,6 +1175,14 @@ export function App(): JSX.Element {
             });
             setLaunchError(null);
             setStreamStatus("streaming");
+            // Auto-enter fullscreen on stream start if user enabled it
+            try {
+              if ((settings as any).autoFullScreen) {
+                void (window as any).openNow?.setFullscreen?.(true);
+              }
+            } catch (err) {
+              console.warn("Failed to auto-fullscreen on stream start:", err);
+            }
           }
         } else if (event.type === "remote-ice") {
           await clientRef.current?.addRemoteCandidate(event.candidate);
@@ -2097,6 +2107,7 @@ export function App(): JSX.Element {
                 controllerUiSounds: settings.controllerUiSounds,
                 autoLoadControllerLibrary: settings.autoLoadControllerLibrary,
                 aspectRatio: settings.aspectRatio,
+                maxBitrateMbps: settings.maxBitrateMbps,
               }}
               resolutionOptions={getResolutionsByAspectRatio(settings.aspectRatio)}
               fpsOptions={fpsOptions}
@@ -2211,6 +2222,7 @@ export function App(): JSX.Element {
                 controllerUiSounds: settings.controllerUiSounds,
                 autoLoadControllerLibrary: settings.autoLoadControllerLibrary,
                 aspectRatio: settings.aspectRatio,
+                maxBitrateMbps: settings.maxBitrateMbps,
               }}
               resolutionOptions={getResolutionsByAspectRatio(settings.aspectRatio)}
               fpsOptions={fpsOptions}

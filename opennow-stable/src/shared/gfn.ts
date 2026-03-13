@@ -59,6 +59,8 @@ export interface Settings {
   controllerMode: boolean;
   controllerUiSounds: boolean;
   autoLoadControllerLibrary: boolean;
+  /** When true, the app will automatically enter fullscreen when controller mode triggers it */
+  autoFullScreen: boolean;
   favoriteGameIds: string[];
   sessionClockShowEveryMinutes: number;
   sessionClockShowDurationSeconds: number;
@@ -363,6 +365,7 @@ export interface OpenNowApi {
   onSignalingEvent(listener: (event: MainToRendererSignalingEvent) => void): () => void;
   /** Listen for F11 fullscreen toggle from main process */
   onToggleFullscreen(listener: () => void): () => void;
+  setFullscreen(v: boolean): Promise<void>;
   toggleFullscreen(): Promise<void>;
   togglePointerLock(): Promise<void>;
   getSettings(): Promise<Settings>;

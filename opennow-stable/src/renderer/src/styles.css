@@ -5496,3 +5496,33 @@ button.game-card-store-chip.active:hover {
   font-weight: 700;
   color: #fff;
 }
+
+/* ---------- XMB Settings Subcategories ---------- */
+/* Subcategories are now hierarchical (A/Cross to enter, LEFT to exit) */
+/* Network, Audio, and System appear as selectable items in the root settings list */
+
+/* Highlight subcategory items in root with a visual indicator */
+.xmb-game-item[data-subcategory-id="network"],
+.xmb-game-item[data-subcategory-id="audio"],
+.xmb-game-item[data-subcategory-id="system"] {
+  position: relative;
+}
+
+.xmb-game-item[data-subcategory-id="network"]::after,
+.xmb-game-item[data-subcategory-id="audio"]::after,
+.xmb-game-item[data-subcategory-id="system"]::after {
+  content: "▶";
+  position: absolute;
+  right: 24px;
+  font-size: 0.7rem;
+  color: rgba(88, 217, 138, 0.6);
+  opacity: 0;
+  transition: all 300ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.xmb-game-item[data-subcategory-id="network"].active::after,
+.xmb-game-item[data-subcategory-id="audio"].active::after,
+.xmb-game-item[data-subcategory-id="system"].active::after {
+  opacity: 1;
+  color: var(--accent);
+}
