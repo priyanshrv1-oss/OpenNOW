@@ -515,6 +515,13 @@ export function ControllerLibraryPage({
         </div>
       </div>
 
+      <div className="xmb-top-left">
+        <div className="xmb-logo" aria-hidden>
+          {/* Use import.meta URL to avoid needing image module typings */}
+          <img src={new URL('../assets/opennow-logo.png', import.meta.url).toString()} alt="OpenNow" />
+        </div>
+      </div>
+
       <div className="xmb-selection-focus" />
 
       <div

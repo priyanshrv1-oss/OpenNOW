@@ -951,6 +951,12 @@ body.controller-mode {
   font-size: 0.87rem;
 }
 
+/* Hide the mouse cursor when controller mode is active and the user is idle */
+body.controller-mode.controller-hide-cursor,
+body.controller-mode.controller-hide-cursor * {
+  cursor: none !important;
+}
+
 .controller-mode .region-dropdown-item {
   padding: 12px 14px;
 }
@@ -5438,6 +5444,22 @@ button.game-card-store-chip.active:hover {
   align-items: center;
   gap: 25px;
   z-index: 2050;
+}
+
+.xmb-top-left {
+  position: absolute;
+  top: 40px;
+  left: 60px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 2050;
+}
+
+.xmb-logo img {
+  height: 100px;
+  width: auto;
+  display: block;
 }
 
 .xmb-clock {

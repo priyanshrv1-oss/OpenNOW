@@ -683,6 +683,42 @@ export function App(): JSX.Element {
     };
   }, [controllerConnected]);
 
+  useEffect(() => {
+    if (!controllerConnected) {
+      document.body.classList.remove("controller-hide-cursor");
+      return;
+    }
+
+    const IDLE_MS = 1300;
+    let timeoutId: number | null = null;
+
+    const hideCursor = () => {
+      document.body.classList.add("controller-hide-cursor");
+    };
+
+    const showCursor = () => {
+      document.body.classList.remove("controller-hide-cursor");
+      if (timeoutId != null) {
+        window.clearTimeout(timeoutId);
+      }
+      timeoutId = window.setTimeout(hideCursor, IDLE_MS) as unknown as number;
+    };
+
+    const onMouseMove = (): void => showCursor();
+
+    // Start visible then hide after timeout
+    showCursor();
+    document.addEventListener("mousemove", onMouseMove, { passive: true });
+
+    return () => {
+      if (timeoutId != null) {
+        window.clearTimeout(timeoutId);
+      }
+      document.removeEventListener("mousemove", onMouseMove);
+      document.body.classList.remove("controller-hide-cursor");
+    };
+  }, [controllerConnected]);
+
   // Derived state
   const selectedProvider = useMemo(() => {
     return providers.find((p) => p.idpId === providerIdpId) ?? authSession?.provider ?? null;
