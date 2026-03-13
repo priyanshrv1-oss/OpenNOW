@@ -521,15 +521,17 @@ export function ControllerLibraryPage({
         className="xmb-categories-container"
         style={{ transform: `translate(${-categoryIndex * CATEGORY_STEP_PX - CATEGORY_ACTIVE_HALF_WIDTH_PX}px, -50%)` }}
       >
-        {TOP_CATEGORIES.map((cat, idx) => {
-          const isActive = idx === categoryIndex;
-          const { label } = getCategoryLabel(cat.id);
-          return (
-            <div key={cat.id} className={`xmb-category-item ${isActive ? 'active' : ''}`}>
-              <div className="xmb-category-label">{label}</div>
-            </div>
-          );
-        })}
+            {TOP_CATEGORIES.map((cat, idx) => {
+              const isActive = idx === categoryIndex;
+              // Use the label already populated on TOP_CATEGORIES so "current"
+              // shows the streaming game's title when available.
+              const label = cat.label;
+              return (
+                <div key={cat.id} className={`xmb-category-item ${isActive ? 'active' : ''}`}>
+                  <div className="xmb-category-label">{label}</div>
+                </div>
+              );
+            })}
       </div>
 
       {topCategory !== "settings" && topCategory !== "current" && (

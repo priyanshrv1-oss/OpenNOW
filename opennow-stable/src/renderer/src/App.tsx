@@ -2043,7 +2043,13 @@ export function App(): JSX.Element {
               onOpenSettings={() => setCurrentPage("settings")}
               currentStreamingGame={streamingGame}
               onResumeGame={() => setControllerOverlayOpen(false)}
-              onCloseGame={handlePromptedStopStream}
+              onCloseGame={async () => {
+                setControllerOverlayOpen(false);
+                // allow overlay close animation to play
+                await sleep(300);
+                await releasePointerLockIfNeeded();
+                await handleStopStream();
+              }}
               pendingSwitchGameCover={pendingSwitchGameCover}
               userName={authSession?.user.displayName}
               userAvatarUrl={authSession?.user.avatarUrl}
