@@ -113,7 +113,15 @@ export function ControllerLibraryPage({
   onSettingChange,
   sessionElapsedSeconds = 0,
 }: ControllerLibraryPageProps): JSX.Element {
-  const initialCategoryIndex = currentStreamingGame ? 0 : 1;
+  const initialCategoryIndex = (() => {
+    const hasFavorites = Array.isArray(favoriteGameIds) && favoriteGameIds.length > 0;
+    if (currentStreamingGame) {
+      // TOP_CATEGORIES: current, settings, all, favorites, ...genres
+      return hasFavorites ? 3 : 0;
+    }
+    // TOP_CATEGORIES without `current`: settings, all, favorites, ...genres
+    return hasFavorites ? 2 : 1;
+  })();
   const [categoryIndex, setCategoryIndex] = useState(initialCategoryIndex);
   const audioContextRef = useRef<AudioContext | null>(null);
   const itemsContainerRef = useRef<HTMLDivElement>(null);
