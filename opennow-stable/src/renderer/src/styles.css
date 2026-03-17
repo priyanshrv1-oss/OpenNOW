@@ -5627,7 +5627,7 @@ button.game-card-store-chip.active:hover {
   left: 0;
   right: 0;
   bottom: 0;
-  background: #000;
+  background: transparent;
   animation: csl-fade-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
