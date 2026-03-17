@@ -288,16 +288,15 @@ export function ControllerLibraryPage({
       ],
       Video: [
         { id: "resolution", label: "Resolution", value: settings.resolution || "1920x1080" },
+        { id: "aspectRatio", label: "Aspect Ratio", value: settings.aspectRatio || "16:9" },
         { id: "fps", label: "Frame Rate", value: `${settings.fps || 60} FPS` },
         { id: "codec", label: "Video Codec", value: settings.codec || "H264" },
-        { id: "bandwidth", label: "Bandwidth Limit", value: `${(settings.maxBitrateMbps ?? 75)} Mbps` },
       ],
       Audio: [
         { id: "microphone", label: "Microphone", value: micLabel },
         { id: "sounds", label: "UI Sounds", value: settings.controllerUiSounds ? "On" : "Off" },
       ],
       System: [
-        { id: "aspectRatio", label: "Aspect Ratio", value: settings.aspectRatio || "16:9" },
         { id: "autoFullScreen", label: "Auto Full Screen", value: (settings as any).autoFullScreen ? "On" : "Off" },
         { id: "autoLoad", label: "Auto-Load Library", value: (settings as any).autoLoadControllerLibrary ? "On" : "Off" },
       ],
