@@ -11,6 +11,7 @@ export interface ControllerStreamLoadingProps {
   queuePosition?: number;
   playtimeData?: PlaytimeStore;
   gameId?: string;
+  enableBackgroundAnimations?: boolean;
 }
 
 function getStatusMessage(
@@ -55,6 +56,7 @@ export function ControllerStreamLoading({
   queuePosition,
   playtimeData = {},
   gameId,
+  enableBackgroundAnimations = false,
 }: ControllerStreamLoadingProps): JSX.Element {
   const statusMessage = getStatusMessage(status, queuePosition);
   const statusPhase = getStatusPhase(status);
@@ -64,6 +66,13 @@ export function ControllerStreamLoading({
 
   return (
     <div className="controller-stream-loading">
+      {enableBackgroundAnimations && (
+        <div className="login-bg" aria-hidden>
+          <div className="login-bg-orb login-bg-orb--1" />
+          <div className="login-bg-orb login-bg-orb--2" />
+          <div className="login-bg-orb login-bg-orb--3" />
+        </div>
+      )}
       {/* Fade-to-black backdrop */}
       <div className="csl-backdrop" />
 

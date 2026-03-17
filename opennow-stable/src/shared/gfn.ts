@@ -59,6 +59,8 @@ export interface Settings {
   controllerMode: boolean;
   controllerUiSounds: boolean;
   autoLoadControllerLibrary: boolean;
+  /** When true, controller-mode overlays will show animated background orbs */
+  controllerBackgroundAnimations: boolean;
   /** When true, the app will automatically enter fullscreen when controller mode triggers it */
   autoFullScreen: boolean;
   favoriteGameIds: string[];

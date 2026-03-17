@@ -1774,6 +1774,21 @@ export function SettingsPage({ settings, regions, onSettingChange }: SettingsPag
 
             <div className="settings-row">
               <label className="settings-label">
+                Background Animations (Controller Mode)
+                <span className="settings-hint">Show animated background visuals on controller loading screens.</span>
+              </label>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={settings.controllerBackgroundAnimations}
+                  onChange={(e) => handleChange("controllerBackgroundAnimations", e.target.checked)}
+                />
+                <span className="settings-toggle-track" />
+              </label>
+            </div>
+
+            <div className="settings-row">
+              <label className="settings-label">
                 Auto-Load Controller Library
                 <span className="settings-hint">Automatically load the controller library view at startup when controller mode is enabled.</span>
               </label>

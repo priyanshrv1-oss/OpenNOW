@@ -5100,8 +5100,8 @@ button.game-card-store-chip.active:hover {
   mix-blend-mode: screen;
   opacity: 0.88;
   transform-origin: center center;
-  /* animations disabled to remove moving background */
-  animation: none !important;
+  /* default: animations disabled; enabled via xmb-animate wrapper */
+  animation: none;
 }
 
 .xmb-bg-gradient::before,
@@ -5120,7 +5120,7 @@ button.game-card-store-chip.active:hover {
   mix-blend-mode: screen;
   opacity: 0.82;
   transform: rotate(-8deg) scale(1.06);
-  animation: none !important;
+  animation: none;
 }
 
 .xmb-bg-gradient::after {
@@ -5129,7 +5129,18 @@ button.game-card-store-chip.active:hover {
     radial-gradient(70% 10% at 41% 70%, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0.08) 16%, rgba(255, 255, 255, 0) 52%);
   opacity: 0.52;
   transform: rotate(6deg) scale(1.12);
-  animation: none !important;
+  animation: none;
+}
+
+/* Enable ribbon animations when wrapper has xmb-animate */
+.xmb-wrapper.xmb-animate .xmb-bg-gradient {
+  animation: xmb-ribbon-pan 30s linear infinite;
+}
+.xmb-wrapper.xmb-animate .xmb-bg-gradient::before {
+  animation: xmb-ribbon-float 26s ease-in-out infinite;
+}
+.xmb-wrapper.xmb-animate .xmb-bg-gradient::after {
+  animation: xmb-ribbon-swell 22s ease-in-out infinite;
 }
 
 .xmb-bg-overlay {

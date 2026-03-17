@@ -52,6 +52,8 @@ export interface Settings {
   controllerMode: boolean;
   /** Play subtle sounds in controller library mode */
   controllerUiSounds: boolean;
+  /** Enable animated background visuals for controller-mode loading screens */
+  controllerBackgroundAnimations: boolean;
   /** Auto-load controller library at startup when controller mode is enabled */
   autoLoadControllerLibrary: boolean;
   /** Automatically enter fullscreen when controller-mode triggers it */
@@ -94,6 +96,7 @@ const DEFAULT_SETTINGS: Settings = {
   hideStreamButtons: false,
   controllerMode: false,
   controllerUiSounds: false,
+  controllerBackgroundAnimations: false,
   autoLoadControllerLibrary: false,
   autoFullScreen: false,
   favoriteGameIds: [],

@@ -390,6 +390,7 @@ export function App(): JSX.Element {
     hideStreamButtons: false,
     controllerMode: false,
     controllerUiSounds: false,
+    controllerBackgroundAnimations: false,
     autoLoadControllerLibrary: false,
     autoFullScreen: false,
     favoriteGameIds: [],
@@ -2079,6 +2080,7 @@ export function App(): JSX.Element {
             queuePosition={queuePosition}
             playtimeData={playtime}
             gameId={streamingGame?.id}
+            enableBackgroundAnimations={settings.controllerBackgroundAnimations}
           />
         )}
         {isSwitchingGame && !settings.controllerMode && (
@@ -2140,6 +2142,7 @@ export function App(): JSX.Element {
                 fps: settings.fps,
                 codec: settings.codec,
                 controllerUiSounds: settings.controllerUiSounds,
+                controllerBackgroundAnimations: settings.controllerBackgroundAnimations,
                 autoLoadControllerLibrary: settings.autoLoadControllerLibrary,
                 autoFullScreen: settings.autoFullScreen,
                 aspectRatio: settings.aspectRatio,
@@ -2162,6 +2165,7 @@ export function App(): JSX.Element {
             queuePosition={queuePosition}
             playtimeData={playtime}
             gameId={streamingGame?.id}
+            enableBackgroundAnimations={settings.controllerBackgroundAnimations}
           />
         )}
         {streamStatus !== "idle" && streamStatus !== "streaming" && !settings.controllerMode && (
@@ -2269,6 +2273,7 @@ export function App(): JSX.Element {
                 fps: settings.fps,
                 codec: settings.codec,
                 controllerUiSounds: settings.controllerUiSounds,
+                controllerBackgroundAnimations: settings.controllerBackgroundAnimations,
                 autoLoadControllerLibrary: settings.autoLoadControllerLibrary,
                 autoFullScreen: settings.autoFullScreen,
                 aspectRatio: settings.aspectRatio,

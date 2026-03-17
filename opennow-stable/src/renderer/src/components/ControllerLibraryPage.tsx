@@ -31,6 +31,7 @@ interface ControllerLibraryPageProps {
     fps?: number;
     codec?: string;
     controllerUiSounds?: boolean;
+    controllerBackgroundAnimations?: boolean;
     autoLoadControllerLibrary?: boolean;
     autoFullScreen?: boolean;
     aspectRatio?: string;
@@ -299,6 +300,7 @@ export function ControllerLibraryPage({
       System: [
         { id: "autoFullScreen", label: "Auto Full Screen", value: (settings as any).autoFullScreen ? "On" : "Off" },
         { id: "autoLoad", label: "Auto-Load Library", value: (settings as any).autoLoadControllerLibrary ? "On" : "Off" },
+        { id: "backgroundAnimations", label: "Background Animations", value: ((settings as any).controllerBackgroundAnimations ? "On" : "Off") },
       ],
     } as Record<string, Array<{ id: string; label: string; value: string }>>;
   }, [settings, microphoneDevices]);
@@ -681,6 +683,9 @@ export function ControllerLibraryPage({
           } else if (setting.id === "autoFullScreen") {
             onSettingChange("autoFullScreen" as any, !((settings as any).autoFullScreen || false));
             playUiSound("move");
+          } else if (setting.id === "backgroundAnimations") {
+            onSettingChange("controllerBackgroundAnimations" as any, !((settings as any).controllerBackgroundAnimations || false));
+            playUiSound("move");
           }
           else if (setting.id === "bandwidth") {
             // Enter bandwidth edit mode so d-pad left/right adjust value
@@ -762,10 +767,10 @@ export function ControllerLibraryPage({
     };
   }, [isLoading, TOP_CATEGORIES.length, categorizedGames, selectedIndex, selectedGame, selectedVariantId, onPlayGame, onSelectGameVariant, onOpenSettings, playUiSound, throttledOnSelectGame, toggleFavoriteForSelected, topCategory, selectedSettingIndex, selectedMediaIndex, displayItems, mediaAssetItems.length, mediaSubcategory, settings, settingsBySubcategory, settingsSubcategory, lastRootSettingIndex, lastRootMediaIndex, onSettingChange, resolutionOptions, fpsOptions, codecOptions, aspectRatioOptions, currentStreamingGame, onResumeGame, onCloseGame, editingBandwidth]);
 
-  if (isLoading && topCategory !== "settings" && topCategory !== "current" && topCategory !== "media") return <div className="xmb-wrapper"><div className="xmb-bg-layer"><div className="xmb-bg-gradient" /></div><div style={{display:'flex',justifyContent:'center',alignItems:'center',height:'100vh'}}>Loading...</div></div>;
+  if (isLoading && topCategory !== "settings" && topCategory !== "current" && topCategory !== "media") return <div className={`xmb-wrapper ${settings.controllerBackgroundAnimations ? 'xmb-animate' : 'xmb-static'}`}><div className="xmb-bg-layer"><div className="xmb-bg-gradient" /></div><div style={{display:'flex',justifyContent:'center',alignItems:'center',height:'100vh'}}>Loading...</div></div>;
 
   return (
-    <div className="xmb-wrapper">
+    <div className={`xmb-wrapper ${settings.controllerBackgroundAnimations ? 'xmb-animate' : 'xmb-static'}`}>
       <div className="xmb-bg-layer">
         <div className="xmb-bg-gradient" />
         <div className="xmb-bg-overlay" />
