@@ -734,6 +734,7 @@ export function ControllerLibraryPage({
       else if (e.key === "ArrowUp") applyDirection("up");
       else if (e.key === "ArrowDown") applyDirection("down");
       else if (e.key === "Enter") activateHandler();
+      else if (e.key.toLowerCase() === "x") secondaryActivateHandler();
       else if (e.key.toLowerCase() === "y") tertiaryActivateHandler();
       else if (e.key.toLowerCase() === "c" || e.key.toLowerCase() === "b") cancelHandler(e);
       else if (e.key === "Escape") {
@@ -747,12 +748,14 @@ export function ControllerLibraryPage({
 
     window.addEventListener("opennow:controller-direction", handler);
     window.addEventListener("opennow:controller-activate", activateHandler);
+    window.addEventListener("opennow:controller-secondary-activate", secondaryActivateHandler);
     window.addEventListener("opennow:controller-tertiary-activate", tertiaryActivateHandler);
     window.addEventListener("opennow:controller-cancel", cancelHandler);
     window.addEventListener("keydown", kbdHandler);
     return () => {
       window.removeEventListener("opennow:controller-direction", handler);
       window.removeEventListener("opennow:controller-activate", activateHandler);
+      window.removeEventListener("opennow:controller-secondary-activate", secondaryActivateHandler);
       window.removeEventListener("opennow:controller-tertiary-activate", tertiaryActivateHandler);
       window.removeEventListener("opennow:controller-cancel", cancelHandler);
       window.removeEventListener("keydown", kbdHandler);
