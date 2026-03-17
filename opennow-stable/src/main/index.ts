@@ -1,8 +1,8 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, session } from "electron";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve, relative } from "node:path";
 import { existsSync, readFileSync, createWriteStream } from "node:fs";
-import { copyFile, mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, rename, stat, unlink, writeFile, realpath } from "node:fs/promises";
 import * as net from "node:net";
 import { randomUUID, createHash } from "node:crypto";
 import { spawn } from "node:child_process";
@@ -988,15 +988,21 @@ function registerIpcHandlers(): void {
 
   // Return a thumbnail data URL for a given media file path (images or companion thumbs for videos).
   ipcMain.handle(IPC_CHANNELS.MEDIA_THUMBNAIL, async (_event, payload: { filePath: string }): Promise<string | null> => {
-    const fp = payload?.filePath;
-    if (!fp) return null;
+    const rawFp = payload?.filePath;
+    if (typeof rawFp !== "string") return null;
+    if (rawFp.length > 4096) return null;
     try {
-      const allowedRoot = join(app.getPath("pictures"), "OpenNOW");
-      if (!fp.startsWith(allowedRoot)) return null;
-      const lower = fp.toLowerCase();
+      const allowedRoot = resolve(join(app.getPath("pictures"), "OpenNOW"));
+      const fpResolved = resolve(rawFp);
+      const allowedRootReal = await realpath(allowedRoot).catch(() => allowedRoot);
+      const fpReal = await realpath(fpResolved).catch(() => fpResolved);
+      const rel = relative(allowedRootReal, fpReal);
+      if (rel.startsWith("..")) return null;
+
+      const lower = fpReal.toLowerCase();
       if (lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".webp")) {
-        const buf = await readFile(fp);
-        const extMatch = /\.([^.]+)$/.exec(fp);
+        const buf = await readFile(fpReal);
+        const extMatch = /\.([^.]+)$/.exec(fpReal);
         const ext = (extMatch?.[1] || "png").toLowerCase();
         const mime = ext === "jpg" || ext === "jpeg" ? "image/jpeg" : ext === "webp" ? "image/webp" : "image/png";
         return `data:${mime};base64,${buf.toString("base64")}`;
@@ -1004,7 +1010,7 @@ function registerIpcHandlers(): void {
 
       if (lower.endsWith(".mp4") || lower.endsWith(".webm") || lower.endsWith(".mkv") || lower.endsWith(".mov")) {
         // Prefer an existing companion thumb next to the video
-        const stem = fp.replace(/\.(mp4|webm|mkv|mov)$/i, "");
+        const stem = fpReal.replace(/\.(mp4|webm|mkv|mov)$/i, "");
         const thumbPath = `${stem}-thumb.jpg`;
         try {
           const b = await readFile(thumbPath);
@@ -1013,7 +1019,7 @@ function registerIpcHandlers(): void {
           // Try generating a cached thumbnail via ffmpeg
         }
 
-        const gen = await ensureThumbnailForMedia(fp);
+        const gen = await ensureThumbnailForMedia(fpReal);
         if (gen) {
           try {
             const b2 = await readFile(gen);
@@ -1033,11 +1039,19 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.MEDIA_SHOW_IN_FOLDER, async (_event, payload: { filePath: string }): Promise<void> => {
-    const fp = payload?.filePath;
-    if (!fp) return;
-    const allowedRoot = join(app.getPath("pictures"), "OpenNOW");
-    if (!fp.startsWith(allowedRoot)) return;
-    shell.showItemInFolder(fp);
+    const rawFp = payload?.filePath;
+    if (typeof rawFp !== "string") return;
+    try {
+      const allowedRoot = resolve(join(app.getPath("pictures"), "OpenNOW"));
+      const fpResolved = resolve(rawFp);
+      const allowedRootReal = await realpath(allowedRoot).catch(() => allowedRoot);
+      const fpReal = await realpath(fpResolved).catch(() => fpResolved);
+      const rel = relative(allowedRootReal, fpReal);
+      if (rel.startsWith("..")) return;
+      shell.showItemInFolder(fpReal);
+    } catch {
+      return;
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.CACHE_REFRESH_MANUAL, async (): Promise<void> => {
