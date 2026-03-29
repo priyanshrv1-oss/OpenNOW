@@ -14,6 +14,16 @@ import type {
   StreamRegion,
   SubscriptionInfo,
 } from "@shared/gfn";
+import {
+  buildGfnHeaders,
+  GFN_CLIENT_STREAMER_WEBRTC,
+  GFN_CLIENT_TYPE_BROWSER,
+  GFN_DEVICE_OS_WINDOWS,
+  GFN_DEVICE_TYPE_DESKTOP,
+  GFN_LCARS_CLIENT_ID,
+  GFN_NVFILE_ORIGIN,
+  GFN_NVFILE_REFERER,
+} from "@shared/gfnClient";
 import { fetchSubscription, fetchDynamicRegions } from "./subscription";
 import {
   buildAuthUrl,
@@ -32,11 +42,18 @@ const TOKEN_ENDPOINT = "https://login.nvidia.com/token";
 const CLIENT_TOKEN_ENDPOINT = "https://login.nvidia.com/client_token";
 const USERINFO_ENDPOINT = "https://login.nvidia.com/userinfo";
 const DEFAULT_IDP_ID = "PDiAhv2kJTFeQ7WOPqiQ2tRZ7lGhR2X11dXvM4TZSxg";
-const GFN_USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 NVIDIACEFClient/HEAD/debb5919f6 GFN-PC/2.0.80.173";
-
 const TOKEN_REFRESH_WINDOW_MS = 10 * 60 * 1000;
 const CLIENT_TOKEN_REFRESH_WINDOW_MS = 5 * 60 * 1000;
+const GFN_BROWSER_SERVER_INFO_HEADERS = Object.freeze(
+  buildGfnHeaders({
+    accept: "application/json",
+    clientId: GFN_LCARS_CLIENT_ID,
+    clientType: GFN_CLIENT_TYPE_BROWSER,
+    clientStreamer: GFN_CLIENT_STREAMER_WEBRTC,
+    deviceOs: GFN_DEVICE_OS_WINDOWS,
+    deviceType: GFN_DEVICE_TYPE_DESKTOP,
+  }),
+);
 
 interface PersistedAuthState {
   session: AuthSession | null;
@@ -137,13 +154,12 @@ async function exchangeAuthorizationCode(code: string, verifier: string, port: n
 
   const response = await fetch(TOKEN_ENDPOINT, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-      Origin: "https://nvfile",
-      Referer: "https://nvfile/",
-      Accept: "application/json, text/plain, */*",
-      "User-Agent": GFN_USER_AGENT,
-    },
+    headers: buildGfnHeaders({
+      contentType: "application/x-www-form-urlencoded; charset=UTF-8",
+      origin: GFN_NVFILE_ORIGIN,
+      referer: GFN_NVFILE_REFERER,
+      accept: "application/json, text/plain, */*",
+    }),
     body,
   });
 
@@ -170,12 +186,11 @@ async function refreshAuthTokens(refreshToken: string): Promise<AuthTokens> {
 
   const response = await fetch(TOKEN_ENDPOINT, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-      Origin: "https://nvfile",
-      Accept: "application/json, text/plain, */*",
-      "User-Agent": GFN_USER_AGENT,
-    },
+    headers: buildGfnHeaders({
+      contentType: "application/x-www-form-urlencoded; charset=UTF-8",
+      origin: GFN_NVFILE_ORIGIN,
+      accept: "application/json, text/plain, */*",
+    }),
     body,
   });
 
@@ -199,12 +214,11 @@ async function requestClientToken(accessToken: string): Promise<{
   lifetimeMs: number;
 }> {
   const response = await fetch(CLIENT_TOKEN_ENDPOINT, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Origin: "https://nvfile",
-      Accept: "application/json, text/plain, */*",
-      "User-Agent": GFN_USER_AGENT,
-    },
+    headers: buildGfnHeaders({
+      authorization: { token: accessToken, scheme: "Bearer" },
+      origin: GFN_NVFILE_ORIGIN,
+      accept: "application/json, text/plain, */*",
+    }),
   });
 
   if (!response.ok) {
@@ -231,12 +245,11 @@ async function refreshWithClientToken(clientToken: string, userId: string): Prom
 
   const response = await fetch(TOKEN_ENDPOINT, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-      Origin: "https://nvfile",
-      Accept: "application/json, text/plain, */*",
-      "User-Agent": GFN_USER_AGENT,
-    },
+    headers: buildGfnHeaders({
+      contentType: "application/x-www-form-urlencoded; charset=UTF-8",
+      origin: GFN_NVFILE_ORIGIN,
+      accept: "application/json, text/plain, */*",
+    }),
     body,
   });
 
@@ -292,12 +305,11 @@ async function fetchUserInfo(tokens: AuthTokens): Promise<AuthUser> {
   }
 
   const response = await fetch(USERINFO_ENDPOINT, {
-    headers: {
-      Authorization: `Bearer ${tokens.accessToken}`,
-      Origin: "https://nvfile",
-      Accept: "application/json",
-      "User-Agent": GFN_USER_AGENT,
-    },
+    headers: buildGfnHeaders({
+      authorization: { token: tokens.accessToken, scheme: "Bearer" },
+      origin: GFN_NVFILE_ORIGIN,
+      accept: "application/json",
+    }),
   });
 
   if (!response.ok) {
@@ -404,10 +416,9 @@ export class AuthService {
     let response: Response;
     try {
       response = await fetch(SERVICE_URLS_ENDPOINT, {
-        headers: {
-          Accept: "application/json",
-          "User-Agent": GFN_USER_AGENT,
-        },
+        headers: buildGfnHeaders({
+          accept: "application/json",
+        }),
       });
     } catch (error) {
       console.warn("Failed to fetch providers, using default:", error);
@@ -468,14 +479,7 @@ export class AuthService {
     }
 
     const headers: Record<string, string> = {
-      Accept: "application/json",
-      "nv-client-id": "ec7e38d4-03af-4b58-b131-cfb0495903ab",
-      "nv-client-type": "BROWSER",
-      "nv-client-version": "2.0.80.173",
-      "nv-client-streamer": "WEBRTC",
-      "nv-device-os": "WINDOWS",
-      "nv-device-type": "DESKTOP",
-      "User-Agent": GFN_USER_AGENT,
+      ...GFN_BROWSER_SERVER_INFO_HEADERS,
     };
 
     if (token) {
@@ -622,14 +626,7 @@ export class AuthService {
     }
 
     const headers: Record<string, string> = {
-      Accept: "application/json",
-      "nv-client-id": "ec7e38d4-03af-4b58-b131-cfb0495903ab",
-      "nv-client-type": "BROWSER",
-      "nv-client-version": "2.0.80.173",
-      "nv-client-streamer": "WEBRTC",
-      "nv-device-os": "WINDOWS",
-      "nv-device-type": "DESKTOP",
-      "User-Agent": GFN_USER_AGENT,
+      ...GFN_BROWSER_SERVER_INFO_HEADERS,
     };
 
     if (token) {

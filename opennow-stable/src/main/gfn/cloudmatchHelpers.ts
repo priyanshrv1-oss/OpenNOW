@@ -5,12 +5,28 @@ import {
   colorQualityBitDepth,
   colorQualityChromaFormat,
 } from "@shared/gfn";
+import {
+  buildGfnHeaders,
+  GFN_APP_LAUNCH_MODE,
+  GFN_BROWSER_TYPE_CHROME,
+  GFN_CLIENT_IDENTIFICATION,
+  GFN_CLIENT_PLATFORM_NAME,
+  GFN_CLIENT_STREAMER_CLASSIC,
+  GFN_CLIENT_STREAMER_WEBRTC,
+  GFN_CLIENT_TYPE_NATIVE,
+  GFN_DEVICE_MAKE_UNKNOWN,
+  GFN_DEVICE_MODEL_UNKNOWN,
+  GFN_DEVICE_TYPE_DESKTOP,
+  GFN_ENHANCED_STREAM_MODE,
+  GFN_PLAY_ORIGIN,
+  GFN_PLAY_REFERER,
+  GFN_SDK_VERSION,
+  GFN_SESSION_REQUEST_CLIENT_VERSION,
+  GFN_STREAMER_VERSION,
+  resolveGfnDeviceOs,
+} from "@shared/gfnClient";
 
 import type { CloudMatchRequest, CloudMatchResponse } from "./types";
-
-export const GFN_USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 NVIDIACEFClient/HEAD/debb5919f6 GFN-PC/2.0.80.173";
-export const GFN_CLIENT_VERSION = "2.0.80.173";
 
 export interface RequestHeadersOptions {
   token: string;
@@ -108,30 +124,28 @@ export function buildSignalingUrl(
 export function requestHeaders(options: RequestHeadersOptions): Record<string, string> {
   const clientId = options.clientId ?? crypto.randomUUID();
   const deviceId = options.deviceId ?? crypto.randomUUID();
+
   const platform = options.platform ?? process.platform;
 
-  const headers: Record<string, string> = {
-    "User-Agent": GFN_USER_AGENT,
-    Authorization: `GFNJWT ${options.token}`,
-    "Content-Type": "application/json",
-    "nv-browser-type": "CHROME",
-    "nv-client-id": clientId,
-    "nv-client-streamer": "NVIDIA-CLASSIC",
-    "nv-client-type": "NATIVE",
-    "nv-client-version": GFN_CLIENT_VERSION,
-    "nv-device-make": "UNKNOWN",
-    "nv-device-model": "UNKNOWN",
-    "nv-device-os": platform === "win32" ? "WINDOWS" : platform === "darwin" ? "MACOS" : "LINUX",
-    "nv-device-type": "DESKTOP",
-    "x-device-id": deviceId,
-  };
-
-  if (options.includeOrigin !== false) {
-    headers["Origin"] = "https://play.geforcenow.com";
-    headers["Referer"] = "https://play.geforcenow.com/";
-  }
-
-  return headers;
+  return buildGfnHeaders({
+    authorization: { token: options.token },
+    contentType: "application/json",
+    clientId,
+    clientStreamer: GFN_CLIENT_STREAMER_CLASSIC,
+    clientType: GFN_CLIENT_TYPE_NATIVE,
+    deviceMake: GFN_DEVICE_MAKE_UNKNOWN,
+    deviceModel: GFN_DEVICE_MODEL_UNKNOWN,
+    deviceOs: resolveGfnDeviceOs(platform),
+    deviceType: GFN_DEVICE_TYPE_DESKTOP,
+    browserType: GFN_BROWSER_TYPE_CHROME,
+    deviceId,
+    ...(options.includeOrigin !== false
+      ? {
+          origin: GFN_PLAY_ORIGIN,
+          referer: GFN_PLAY_REFERER,
+        }
+      : {}),
+  });
 }
 
 export function parseResolution(input: string): { width: number; height: number } {
@@ -170,12 +184,12 @@ export function buildSessionRequestBody(
       availableSupportedControllers: [],
       networkTestSessionId: null,
       parentSessionId: null,
-      clientIdentification: "GFN-PC",
+      clientIdentification: GFN_CLIENT_IDENTIFICATION,
       deviceHashId: options.deviceHashId ?? crypto.randomUUID(),
-      clientVersion: "30.0",
-      sdkVersion: "1.0",
-      streamerVersion: 1,
-      clientPlatformName: "windows",
+      clientVersion: GFN_SESSION_REQUEST_CLIENT_VERSION,
+      sdkVersion: GFN_SDK_VERSION,
+      streamerVersion: GFN_STREAMER_VERSION,
+      clientPlatformName: GFN_CLIENT_PLATFORM_NAME,
       clientRequestMonitorSettings: [
         {
           widthInPixels: width,
@@ -195,7 +209,7 @@ export function buildSessionRequestBody(
       metaData: [
         { key: "SubSessionId", value: options.subSessionId ?? crypto.randomUUID() },
         { key: "wssignaling", value: "1" },
-        { key: "GSStreamerType", value: "WebRTC" },
+        { key: "GSStreamerType", value: GFN_CLIENT_STREAMER_WEBRTC },
         { key: "networkType", value: "Unknown" },
         { key: "ClientImeSupport", value: "0" },
         {
@@ -215,8 +229,8 @@ export function buildSessionRequestBody(
       surroundAudioInfo: 0,
       remoteControllersBitmap: 0,
       clientTimezoneOffset: -(options.now ?? new Date()).getTimezoneOffset() * 60 * 1000,
-      enhancedStreamMode: 1,
-      appLaunchMode: 1,
+      enhancedStreamMode: GFN_ENHANCED_STREAM_MODE,
+      appLaunchMode: GFN_APP_LAUNCH_MODE,
       secureRTSPSupported: false,
       partnerCustomData: "",
       accountLinked,
