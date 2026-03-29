@@ -51,6 +51,8 @@ interface StreamViewProps {
   onCancelExit: () => void;
   onEndSession: () => void;
   onToggleMicrophone?: () => void;
+  rawMouseInput: boolean;
+  onRawMouseInputChange: (value: boolean) => void;
   mouseSensitivity: number;
   onMouseSensitivityChange: (value: number) => void;
   mouseAcceleration: number;
@@ -291,6 +293,8 @@ export function StreamView({
   onCancelExit,
   onEndSession,
   onToggleMicrophone,
+  rawMouseInput,
+  onRawMouseInputChange,
   mouseSensitivity,
   onMouseSensitivityChange,
   mouseAcceleration,
@@ -1036,10 +1040,24 @@ export function StreamView({
                     <span>Mouse Preferences</span>
                     <span className="sidebar-section-sub">Fine-tune cursor movement</span>
                   </div>
+                  <div className="sidebar-row sidebar-row--aligned">
+                    <div className="sidebar-copy">
+                      <span className="sidebar-label">Raw Input</span>
+                      <span className="sidebar-hint">Uses unadjusted pointer lock when available and forces 1.00x / no acceleration.</span>
+                    </div>
+                    <label className="settings-toggle">
+                      <input
+                        type="checkbox"
+                        checked={rawMouseInput}
+                        onChange={(event) => onRawMouseInputChange(event.target.checked)}
+                      />
+                      <span className="settings-toggle-track" />
+                    </label>
+                  </div>
                   <div className="sidebar-row sidebar-row--column">
                     <div className="sidebar-row-top">
                       <span className="sidebar-label">Mouse Sensitivity</span>
-                      <span className="settings-value-badge">{mouseSensitivity.toFixed(2)}x</span>
+                      <span className="settings-value-badge">{rawMouseInput ? "1.00x" : `${mouseSensitivity.toFixed(2)}x`}</span>
                     </div>
                     <input
                       type="range"
@@ -1048,6 +1066,7 @@ export function StreamView({
                       max={4}
                       step={0.01}
                       value={mouseSensitivity}
+                      disabled={rawMouseInput}
                       onChange={(event) => {
                         const next = Number(event.target.value);
                         if (Number.isFinite(next)) {
@@ -1055,12 +1074,16 @@ export function StreamView({
                         }
                       }}
                     />
-                    <span className="sidebar-hint">Multiplier applied to mouse movement (1.00 = default).</span>
+                    <span className="sidebar-hint">
+                      {rawMouseInput
+                        ? "Raw Input is enabled, so sensitivity is locked to 1.00x."
+                        : "Multiplier applied to mouse movement (1.00 = default)."}
+                    </span>
                   </div>
                   <div className="sidebar-row sidebar-row--column">
                     <div className="sidebar-row-top">
                       <span className="sidebar-label">Mouse Accelerator</span>
-                      <span className="settings-value-badge">{Math.round(mouseAcceleration)}%</span>
+                      <span className="settings-value-badge">{rawMouseInput ? "Off" : `${Math.round(mouseAcceleration)}%`}</span>
                     </div>
                     <input
                       type="range"
@@ -1069,6 +1092,7 @@ export function StreamView({
                       max={150}
                       step={1}
                       value={Math.round(mouseAcceleration)}
+                      disabled={rawMouseInput}
                       onChange={(event) => {
                         const next = Number(event.target.value);
                         if (Number.isFinite(next)) {
@@ -1076,7 +1100,11 @@ export function StreamView({
                         }
                       }}
                     />
-                    <span className="sidebar-hint">Dynamic turn boost strength (1% = off-like, 150% = strongest).</span>
+                    <span className="sidebar-hint">
+                      {rawMouseInput
+                        ? "Raw Input disables the app-side mouse accelerator."
+                        : "Dynamic turn boost strength (1% = off-like, 150% = strongest)."}
+                    </span>
                   </div>
                 </section>
                 <div className="sidebar-separator" aria-hidden="true" />

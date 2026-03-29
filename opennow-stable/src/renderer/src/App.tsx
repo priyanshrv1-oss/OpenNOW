@@ -404,6 +404,7 @@ export function App(): JSX.Element {
     clipboardPaste: false,
     mouseSensitivity: 1,
     mouseAcceleration: 1,
+    rawMouseInput: false,
     shortcutToggleStats: DEFAULT_SHORTCUTS.shortcutToggleStats,
     shortcutTogglePointerLock: DEFAULT_SHORTCUTS.shortcutTogglePointerLock,
     shortcutStopStream: DEFAULT_SHORTCUTS.shortcutStopStream,
@@ -1047,15 +1048,20 @@ export function App(): JSX.Element {
       ]).catch(() => {});
     }
 
-    await requestPointerLockCompat({ unadjustedMovement: true })
-      .catch((err: DOMException) => {
-        if (err.name === "NotSupportedError") {
-          return requestPointerLockCompat();
-        }
-        throw err;
-      })
-      .catch(() => {});
-  }, []);
+    if (settings.rawMouseInput) {
+      await requestPointerLockCompat({ unadjustedMovement: true })
+        .catch((err: DOMException) => {
+          if (err.name === "NotSupportedError") {
+            return requestPointerLockCompat();
+          }
+          throw err;
+        })
+        .catch(() => {});
+      return;
+    }
+
+    await requestPointerLockCompat().catch(() => {});
+  }, [settings.rawMouseInput]);
 
   const handleRequestPointerLock = useCallback(() => {
     if (videoRef.current) {
@@ -1239,6 +1245,7 @@ export function App(): JSX.Element {
               microphoneDeviceId: settings.microphoneDeviceId || undefined,
               mouseSensitivity: settings.mouseSensitivity,
               mouseAcceleration: settings.mouseAcceleration,
+              rawMouseInput: settings.rawMouseInput,
               onLog: (line: string) => console.log(`[WebRTC] ${line}`),
               onStats: (stats) => diagnosticsStore.set(stats),
               onEscHoldProgress: (visible, progress) => {
@@ -1317,6 +1324,13 @@ export function App(): JSX.Element {
     if (key === "mouseAcceleration") {
       try {
         (clientRef.current as any)?.setMouseAccelerationPercent?.(value as number);
+      } catch {
+        // ignore
+      }
+    }
+    if (key === "rawMouseInput") {
+      try {
+        (clientRef.current as any)?.setRawMouseInputEnabled?.(value as boolean);
       } catch {
         // ignore
       }
@@ -2153,6 +2167,10 @@ export function App(): JSX.Element {
             }}
             onToggleMicrophone={() => {
               clientRef.current?.toggleMicrophone();
+            }}
+            rawMouseInput={settings.rawMouseInput}
+            onRawMouseInputChange={(value) => {
+              void updateSetting("rawMouseInput", value);
             }}
             mouseSensitivity={settings.mouseSensitivity}
             onMouseSensitivityChange={handleMouseSensitivityChange}

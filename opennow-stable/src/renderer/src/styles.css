@@ -2006,6 +2006,10 @@ button.game-card-store-chip.active:hover {
   gap: 14px;
 }
 
+.settings-row--top-aligned {
+  align-items: flex-start;
+}
+
 .settings-row--column {
   flex-direction: column;
   align-items: stretch;
@@ -2054,6 +2058,33 @@ button.game-card-store-chip.active:hover {
   font-weight: 500;
   flex-shrink: 0;
   cursor: default;
+  min-width: 0;
+}
+
+.settings-row:not(.settings-row--column) > .settings-label {
+  flex: 1 1 auto;
+}
+
+.settings-label-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.settings-inline-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(88, 217, 138, 0.28);
+  background: rgba(88, 217, 138, 0.12);
+  color: var(--accent);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 .settings-hint {
@@ -2062,6 +2093,7 @@ button.game-card-store-chip.active:hover {
   font-size: 0.78rem;
   color: var(--ink-muted);
   font-weight: 500;
+  overflow-wrap: anywhere;
 }
 
 /* Text input for resolution / FPS */
@@ -2086,6 +2118,30 @@ button.game-card-store-chip.active:hover {
 .settings-text-input.error {
   border-color: var(--error);
   box-shadow: 0 0 0 2px var(--error-bg);
+}
+
+.settings-number-input {
+  padding: 7px 10px;
+  background: var(--bg-a);
+  border: 1px solid var(--panel-border-solid);
+  border-radius: 6px;
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-family: inherit;
+  outline: none;
+  transition: border-color var(--t-fast), box-shadow var(--t-fast), opacity var(--t-fast);
+}
+
+.settings-number-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-surface);
+}
+
+.settings-text-input:disabled,
+.settings-number-input:disabled,
+.settings-slider:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .settings-text-input--narrow {
@@ -2283,6 +2339,11 @@ button.game-card-store-chip.active:hover {
 
 .settings-slider::-webkit-slider-thumb:hover {
   transform: scale(1.2);
+}
+
+.settings-slider:disabled,
+.settings-slider:disabled::-webkit-slider-thumb {
+  cursor: not-allowed;
 }
 
 /* Toggle */
@@ -4596,6 +4657,14 @@ button.game-card-store-chip.active:hover {
 
 .sidebar-row--aligned {
   justify-content: space-between;
+}
+
+.sidebar-copy {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .sidebar-row-top {

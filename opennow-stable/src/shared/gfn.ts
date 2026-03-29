@@ -46,6 +46,7 @@ export interface Settings {
   clipboardPaste: boolean;
   mouseSensitivity: number;
   mouseAcceleration: number;
+  rawMouseInput: boolean;
   shortcutToggleStats: string;
   shortcutTogglePointerLock: string;
   shortcutStopStream: string;

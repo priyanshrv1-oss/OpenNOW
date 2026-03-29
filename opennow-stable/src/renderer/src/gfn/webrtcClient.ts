@@ -203,6 +203,8 @@ interface ClientOptions {
   mouseSensitivity?: number;
   /** Software acceleration strength percentage (1-150) */
   mouseAcceleration?: number;
+  /** Prefer unadjusted pointer lock and bypass app-side mouse scaling */
+  rawMouseInput?: boolean;
   onLog: (line: string) => void;
   onStats?: (stats: StreamDiagnostics) => void;
   onEscHoldProgress?: (visible: boolean, progress: number) => void;
@@ -530,6 +532,7 @@ export class GfnWebRtcClient {
   private mouseDeltaFilter = new MouseDeltaFilter();
   private mouseSensitivity = 1;
   private mouseAccelerationPercent = 1;
+  private rawMouseInputEnabled = false;
 
   private partialReliableThresholdMs = GfnWebRtcClient.DEFAULT_PARTIAL_RELIABLE_THRESHOLD_MS;
   private inputQueuePeakBufferedBytesWindow = 0;
@@ -606,6 +609,7 @@ export class GfnWebRtcClient {
     options.audioElement.muted = true;
     this.mouseSensitivity = options.mouseSensitivity ?? 1;
     this.mouseAccelerationPercent = Math.max(1, Math.min(150, Math.round(options.mouseAcceleration ?? 1)));
+    this.rawMouseInputEnabled = options.rawMouseInput ?? false;
 
     // Configure video element for lowest latency playback
     this.configureVideoElementForLowLatency(options.videoElement);
@@ -666,6 +670,12 @@ export class GfnWebRtcClient {
     const v = Number.isFinite(value) ? value : 1;
     this.mouseAccelerationPercent = Math.max(1, Math.min(150, Math.round(v)));
     this.log(`Mouse acceleration set to ${this.mouseAccelerationPercent}%`);
+  }
+
+  /** Toggle raw/unadjusted mouse input mode for future pointer-lock requests. */
+  public setRawMouseInputEnabled(value: boolean): void {
+    this.rawMouseInputEnabled = Boolean(value);
+    this.log(`Raw mouse input ${this.rawMouseInputEnabled ? "enabled" : "disabled"}`);
   }
 
   /**
@@ -2025,6 +2035,12 @@ export class GfnWebRtcClient {
 
     await this.lockEscapeInFullscreen();
 
+    if (!this.rawMouseInputEnabled) {
+      await this.requestPointerLockCompat(lockTarget);
+      this.log("Pointer lock acquired with standard mouse input");
+      return;
+    }
+
     try {
       await this.requestPointerLockCompat(lockTarget, { unadjustedMovement: true });
       this.log("Pointer lock acquired with unadjustedMovement=true (raw/unaccelerated)");
@@ -2332,10 +2348,11 @@ export class GfnWebRtcClient {
       }
 
       // Apply user-configured sensitivity, then optional software acceleration.
-      let adjustedDx = this.mouseDeltaFilter.getX() * this.mouseSensitivity;
-      let adjustedDy = this.mouseDeltaFilter.getY() * this.mouseSensitivity;
+      const sensitivity = this.rawMouseInputEnabled ? 1 : this.mouseSensitivity;
+      let adjustedDx = this.mouseDeltaFilter.getX() * sensitivity;
+      let adjustedDy = this.mouseDeltaFilter.getY() * sensitivity;
 
-      if (this.mouseAccelerationPercent > 1) {
+      if (!this.rawMouseInputEnabled && this.mouseAccelerationPercent > 1) {
         const speed = Math.hypot(adjustedDx, adjustedDy);
         const strength = (this.mouseAccelerationPercent - 1) / 149;
         // Gentle curve: low-speed precision, high-speed turn boost (caps at +60% at 150%).

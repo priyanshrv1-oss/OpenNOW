@@ -24,6 +24,8 @@ export interface Settings {
   mouseSensitivity: number;
   /** Software mouse acceleration strength percentage (1-150) */
   mouseAcceleration: number;
+  /** Prefer unadjusted pointer-lock input and force 1x / no software acceleration */
+  rawMouseInput: boolean;
   /** Toggle stats overlay shortcut */
   shortcutToggleStats: string;
   /** Toggle pointer lock shortcut */
@@ -86,6 +88,7 @@ const DEFAULT_SETTINGS: Settings = {
   clipboardPaste: false,
   mouseSensitivity: 1,
   mouseAcceleration: 1,
+  rawMouseInput: false,
   shortcutToggleStats: "F3",
   shortcutTogglePointerLock: "F8",
   shortcutStopStream: defaultStopShortcut,

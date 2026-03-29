@@ -1252,7 +1252,7 @@ export function SettingsPage({ settings, regions, onSettingChange }: SettingsPag
               />
             </div>
 
-            <div className="settings-row">
+            <div className="settings-row settings-row--top-aligned">
               <label className="settings-label">
                 Experimental L4S Request
                 <span className="settings-hint">Request the GeForce NOW L4S streaming feature on newly created sessions. This does not change browser WebRTC behavior by itself and may be ignored by the service or network path.</span>
@@ -1265,48 +1265,6 @@ export function SettingsPage({ settings, regions, onSettingChange }: SettingsPag
                 />
                 <span className="settings-toggle-track" />
               </label>
-            </div>
-
-            <div className="settings-row settings-row--column">
-              <div className="settings-row-top">
-                <label className="settings-label">Session Timer Reappear</label>
-                <span className="settings-value-badge">
-                  {settings.sessionClockShowEveryMinutes === 0
-                    ? "Off"
-                    : `Every ${settings.sessionClockShowEveryMinutes} min`}
-                </span>
-              </div>
-              <input
-                type="range"
-                className="settings-slider"
-                min={0}
-                max={120}
-                step={5}
-                value={settings.sessionClockShowEveryMinutes}
-                onChange={(e) => handleChange("sessionClockShowEveryMinutes", parseInt(e.target.value, 10))}
-              />
-              <span className="settings-subtle-hint">
-                How often the session timer pops back up while streaming (0 disables repeats).
-              </span>
-            </div>
-
-            <div className="settings-row settings-row--column">
-              <div className="settings-row-top">
-                <label className="settings-label">Session Timer Visible Time</label>
-                <span className="settings-value-badge">{settings.sessionClockShowDurationSeconds}s</span>
-              </div>
-              <input
-                type="range"
-                className="settings-slider"
-                min={5}
-                max={120}
-                step={5}
-                value={settings.sessionClockShowDurationSeconds}
-                onChange={(e) => handleChange("sessionClockShowDurationSeconds", parseInt(e.target.value, 10))}
-              />
-              <span className="settings-subtle-hint">
-                How long the session timer stays visible each time it appears.
-              </span>
             </div>
           </div>
         </section>
@@ -1532,11 +1490,26 @@ export function SettingsPage({ settings, regions, onSettingChange }: SettingsPag
               </label>
             </div>
 
+            <div className="settings-row settings-row--top-aligned">
+              <label className="settings-label">
+                Raw Input
+                <span className="settings-hint">Uses unadjusted pointer lock when available, forces 1.00x mouse sensitivity, and disables software mouse acceleration.</span>
+              </label>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={settings.rawMouseInput}
+                  onChange={(e) => handleChange("rawMouseInput", e.target.checked)}
+                />
+                <span className="settings-toggle-track" />
+              </label>
+            </div>
+
             {/* Mouse Sensitivity */}
             <div className="settings-row settings-row--column">
               <div className="settings-row-top">
                 <label className="settings-label">Mouse Sensitivity</label>
-                <span className="settings-value-badge">{settings.mouseSensitivity.toFixed(2)}x</span>
+                <span className="settings-value-badge">{settings.rawMouseInput ? "1.00x" : `${settings.mouseSensitivity.toFixed(2)}x`}</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <input
@@ -1546,6 +1519,7 @@ export function SettingsPage({ settings, regions, onSettingChange }: SettingsPag
                   max={4}
                   step={0.01}
                   value={settings.mouseSensitivity}
+                  disabled={settings.rawMouseInput}
                   onChange={(e) => handleChange("mouseSensitivity", parseFloat(e.target.value))}
                 />
                 <input
@@ -1556,19 +1530,24 @@ export function SettingsPage({ settings, regions, onSettingChange }: SettingsPag
                   max={4}
                   step={0.01}
                   value={Number(settings.mouseSensitivity.toFixed(2))}
+                  disabled={settings.rawMouseInput}
                   onChange={(e) => {
                     const v = parseFloat(e.target.value || "0");
                     if (Number.isFinite(v)) handleChange("mouseSensitivity", Math.max(0.1, Math.min(4, v)));
                   }}
                 />
               </div>
-              <span className="settings-subtle-hint">Multiplier applied to mouse movement (1.00 = default)</span>
+              <span className="settings-subtle-hint">
+                {settings.rawMouseInput
+                  ? "Raw Input is enabled, so sensitivity is locked to 1.00x."
+                  : "Multiplier applied to mouse movement (1.00 = default)"}
+              </span>
             </div>
 
             <div className="settings-row settings-row--column">
               <div className="settings-row-top">
                 <label className="settings-label">Mouse Accelerator</label>
-                <span className="settings-value-badge">{Math.round(settings.mouseAcceleration)}%</span>
+                <span className="settings-value-badge">{settings.rawMouseInput ? "Off" : `${Math.round(settings.mouseAcceleration)}%`}</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <input
@@ -1578,6 +1557,7 @@ export function SettingsPage({ settings, regions, onSettingChange }: SettingsPag
                   max={150}
                   step={1}
                   value={Math.round(settings.mouseAcceleration)}
+                  disabled={settings.rawMouseInput}
                   onChange={(e) => handleChange("mouseAcceleration", Math.max(1, Math.min(150, Math.round(Number(e.target.value) || 1))))}
                 />
                 <input
@@ -1588,6 +1568,7 @@ export function SettingsPage({ settings, regions, onSettingChange }: SettingsPag
                   max={150}
                   step={1}
                   value={Math.round(settings.mouseAcceleration)}
+                  disabled={settings.rawMouseInput}
                   onChange={(e) => {
                     const v = Number(e.target.value || "1");
                     if (Number.isFinite(v)) {
@@ -1596,7 +1577,11 @@ export function SettingsPage({ settings, regions, onSettingChange }: SettingsPag
                   }}
                 />
               </div>
-              <span className="settings-subtle-hint">Dynamic turn boost strength (1% = off-like, 150% = strongest).</span>
+              <span className="settings-subtle-hint">
+                {settings.rawMouseInput
+                  ? "Raw Input disables the app-side mouse accelerator."
+                  : "Dynamic turn boost strength (1% = off-like, 150% = strongest)."}
+              </span>
             </div>
 
             <div className="settings-row settings-row--column">
@@ -1748,7 +1733,10 @@ export function SettingsPage({ settings, regions, onSettingChange }: SettingsPag
 
             <div className="settings-row">
               <label className="settings-label">
-                Controller Mode Library
+                <span className="settings-label-inline">
+                  <span>Controller Mode Library</span>
+                  <span className="settings-inline-badge">Beta</span>
+                </span>
                 <span className="settings-hint">Replace the desktop library/settings navigation with the controller-first layout only when controller mode is enabled.</span>
               </label>
               <label className="settings-toggle">
@@ -1759,6 +1747,48 @@ export function SettingsPage({ settings, regions, onSettingChange }: SettingsPag
                 />
                 <span className="settings-toggle-track" />
               </label>
+            </div>
+
+            <div className="settings-row settings-row--column">
+              <div className="settings-row-top">
+                <label className="settings-label">Session Timer Reappear</label>
+                <span className="settings-value-badge">
+                  {settings.sessionClockShowEveryMinutes === 0
+                    ? "Off"
+                    : `Every ${settings.sessionClockShowEveryMinutes} min`}
+                </span>
+              </div>
+              <input
+                type="range"
+                className="settings-slider"
+                min={0}
+                max={120}
+                step={5}
+                value={settings.sessionClockShowEveryMinutes}
+                onChange={(e) => handleChange("sessionClockShowEveryMinutes", parseInt(e.target.value, 10))}
+              />
+              <span className="settings-subtle-hint">
+                How often the session timer pops back up while streaming (0 disables repeats).
+              </span>
+            </div>
+
+            <div className="settings-row settings-row--column">
+              <div className="settings-row-top">
+                <label className="settings-label">Session Timer Visible Time</label>
+                <span className="settings-value-badge">{settings.sessionClockShowDurationSeconds}s</span>
+              </div>
+              <input
+                type="range"
+                className="settings-slider"
+                min={5}
+                max={120}
+                step={5}
+                value={settings.sessionClockShowDurationSeconds}
+                onChange={(e) => handleChange("sessionClockShowDurationSeconds", parseInt(e.target.value, 10))}
+              />
+              <span className="settings-subtle-hint">
+                How long the session timer stays visible each time it appears.
+              </span>
             </div>
 
             {settings.controllerMode && (
