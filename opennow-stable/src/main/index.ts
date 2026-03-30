@@ -151,12 +151,11 @@ if (process.platform === "linux" && !isLinuxArm) {
 }
 app.commandLine.appendSwitch("disable-features", disableFeatures.join(","));
 
-app.commandLine.appendSwitch("force-fieldtrials",
-  [
-    // Disable send-side pacing — we are receive-only, pacing adds latency to RTCP feedback
-    "WebRTC-Video-Pacing/Disabled/",
-  ].join("/"),
-);
+// Keep Chromium's default WebRTC pacing enabled.
+// Disabling WebRTC-Video-Pacing made receive-side playback more bursty in practice, which
+// lines up with the quantized presentation gaps and dropped-presented-frame bursts seen in
+// stream diagnostics on high-FPS profiles. OpenNOW is primarily a receive path here, so
+// there is no strong reason to override Chromium's pacing behavior at startup.
 
 if (bootstrapVideoPrefs.decoderPreference === "hardware") {
   app.commandLine.appendSwitch("enable-accelerated-video-decode");
