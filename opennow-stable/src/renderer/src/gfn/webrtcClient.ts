@@ -125,6 +125,37 @@ function hevcPreferredProfileId(colorQuality: ColorQuality): 1 | 2 {
   return colorQuality.startsWith("10bit") ? 2 : 1;
 }
 
+function applyPresentationSafetyGuardrails(settings: OfferSettings): {
+  width: number;
+  height: number;
+  safeMaxBitrateKbps: number;
+  reason: string | null;
+} {
+  const { width, height } = parseResolution(settings.resolution);
+  const pixelCount = width * height;
+  let safeMaxBitrateKbps = settings.maxBitrateKbps;
+  let reason: string | null = null;
+
+  // Electron/Chromium is showing very high presented-frame drop rates on the
+  // AV1 120fps high-resolution path even when decoder/underflow telemetry looks
+  // nominal. Cap the initial bitrate for that profile so we do not overwhelm
+  // compositor presentation with an unsustainably dense frame stream.
+  if (settings.codec === "AV1" && settings.fps >= 120 && pixelCount >= 3_686_400) {
+    const guardedCapKbps = 80_000;
+    if (safeMaxBitrateKbps > guardedCapKbps) {
+      safeMaxBitrateKbps = guardedCapKbps;
+      reason = `presentation_guardrail_av1_${width}x${height}_${settings.fps}fps`;
+    }
+  }
+
+  return {
+    width,
+    height,
+    safeMaxBitrateKbps,
+    reason,
+  };
+}
+
 export interface StreamDiagnostics {
   // Connection state
   connectionState: RTCPeerConnectionState | "closed";
@@ -3720,6 +3751,8 @@ export class GfnWebRtcClient {
 
   async handleOffer(offerSdp: string, session: SessionInfo, settings: OfferSettings): Promise<void> {
     this.cleanupPeerConnection();
+    const guardedProfile = applyPresentationSafetyGuardrails(settings);
+    const effectiveMaxBitrateKbps = guardedProfile.safeMaxBitrateKbps;
 
     this.log("=== handleOffer START ===");
     this.log(`Session: id=${session.sessionId}, status=${session.status}, serverIp=${session.serverIp}`);
@@ -3728,6 +3761,11 @@ export class GfnWebRtcClient {
     this.log(
       `Settings: codec=${settings.codec}, colorQuality=${settings.colorQuality}, resolution=${settings.resolution}, fps=${settings.fps}, maxBitrate=${settings.maxBitrateKbps}kbps`,
     );
+    if (guardedProfile.reason) {
+      this.log(
+        `Presentation safety guardrail applied: ${guardedProfile.reason}, bitrate ${settings.maxBitrateKbps} -> ${effectiveMaxBitrateKbps} kbps`,
+      );
+    }
     this.log(`ICE servers: ${session.iceServers.length} (${session.iceServers.map(s => s.urls.join(",")).join(" | ")})`);
     this.log(`Offer SDP length: ${offerSdp.length} chars`);
     // Log full offer SDP for ICE debugging
@@ -3741,7 +3779,7 @@ export class GfnWebRtcClient {
     this.partialReliableThresholdMs = negotiatedPartialReliable ?? GfnWebRtcClient.DEFAULT_PARTIAL_RELIABLE_THRESHOLD_MS;
     this.negotiatedMaxBitrateKbps = Math.max(
       GfnWebRtcClient.DECODER_MIN_RECOVERY_BITRATE_KBPS,
-      Math.floor(settings.maxBitrateKbps),
+      Math.floor(effectiveMaxBitrateKbps),
     );
     this.currentBitrateCeilingKbps = this.negotiatedMaxBitrateKbps;
     this.log(
@@ -3954,8 +3992,8 @@ export class GfnWebRtcClient {
 
     // Munge answer SDP: inject b=AS: bitrate limits and stereo=1 for opus
     if (answer.sdp) {
-      answer.sdp = mungeAnswerSdp(answer.sdp, settings.maxBitrateKbps);
-      this.log(`Answer SDP munged (b=AS:${settings.maxBitrateKbps}, stereo=1)`);
+      answer.sdp = mungeAnswerSdp(answer.sdp, effectiveMaxBitrateKbps);
+      this.log(`Answer SDP munged (b=AS:${effectiveMaxBitrateKbps}, stereo=1)`);
     }
 
     await pc.setLocalDescription(answer);
@@ -4000,7 +4038,7 @@ export class GfnWebRtcClient {
 
     const credentials = extractIceCredentials(finalSdp);
     this.log(`Extracted ICE credentials: ufrag=${credentials.ufrag}, pwd=${credentials.pwd.slice(0, 8)}...`);
-    const { width, height } = parseResolution(settings.resolution);
+    const { width, height } = guardedProfile;
     const viewportRect = this.options.videoElement.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
     const baseCssViewportWidth = Math.max(viewportRect.width, window.innerWidth || 0);
@@ -4026,7 +4064,7 @@ export class GfnWebRtcClient {
       clientViewportWidth,
       clientViewportHeight,
       fps: settings.fps,
-      maxBitrateKbps: settings.maxBitrateKbps,
+      maxBitrateKbps: effectiveMaxBitrateKbps,
       partialReliableThresholdMs: this.partialReliableThresholdMs,
       codec: effectiveCodec,
       colorQuality: settings.colorQuality,
