@@ -104,31 +104,13 @@ export class GfnSignalingClient {
     this.ws.send(JSON.stringify(payload));
   }
 
-  private buildWebSocketProtocols(): string[] {
-    const protocols = [`x-nv-sessionid.${this.sessionId}`];
-    const headers = buildGfnHeaders({
-      clientId: this.clientId,
-      clientType: GFN_CLIENT_TYPE_NATIVE,
-      clientStreamer: GFN_CLIENT_STREAMER_WEBRTC,
-      clientVersion: GFN_CLIENT_VERSION,
-      deviceOs: "WINDOWS",
-      deviceType: "DESKTOP",
-      deviceMake: "UNKNOWN",
-      deviceModel: "UNKNOWN",
-      deviceId: this.deviceId,
-    });
-
-    for (const [name, value] of Object.entries(headers)) {
-      if (name === "User-Agent" || name === "Origin" || name === "Referer" || name === "Authorization" || name === "Content-Type") {
-        continue;
-      }
-      if (!/^[A-Za-z0-9._-]+$/.test(name) || !/^[A-Za-z0-9._-]+$/.test(value)) {
-        continue;
-      }
-      protocols.push(`${name}.${value}`);
-    }
-
-    return protocols;
+  private buildHandshakeHeaders(): Record<string, string> {
+    return {
+      ...buildGfnHeaders({
+        origin: GFN_PLAY_ORIGIN,
+      }),
+      Host: this.signalingServer.includes(":") ? this.signalingServer : `${this.signalingServer}:443`,
+    };
   }
 
   private redactProtocol(value: string): string {
@@ -137,6 +119,20 @@ export class GfnSignalingClient {
       return value;
     }
     return `${name}.${rest.slice(0, 8)}${rest.length > 8 ? "…" : ""}`;
+  }
+
+  private summarizeHeaders(headers: Record<string, string>): string {
+    return Object.entries(headers)
+      .map(([name, value]) => {
+        if (name === "User-Agent" || name === "Authorization") {
+          return `${name}=set`;
+        }
+        if (name === "Host" || name === "Origin" || name === "Referer") {
+          return `${name}=${value}`;
+        }
+        return `${name}=set`;
+      })
+      .join(", ");
   }
 
   private summarizeFrame(payload: Record<string, unknown>): string {
@@ -172,10 +168,6 @@ export class GfnSignalingClient {
           `messages=${this.receivedMessageCount} ack=${this.sawAck ? 1 : 0} hb=${this.sawHeartbeat ? 1 : 0} peer_info=${this.sawPeerInfo ? 1 : 0} remotePeer=${this.remotePeerId ?? "n/a"}`,
       );
     }, warnAfterMs);
-  }
-
-  private getRemotePeerTargetId(): number {
-    return this.remotePeerId ?? 1;
   }
 
   private setupHeartbeat(): void {
@@ -214,20 +206,18 @@ export class GfnSignalingClient {
     }
 
     const url = this.buildSignInUrl();
-    const protocols = this.buildWebSocketProtocols();
+    const protocol = `x-nv-sessionid.${this.sessionId}`;
+    const headers = this.buildHandshakeHeaders();
     const parsedUrl = new URL(url);
 
     console.log(
-      `[Signaling] Connecting host=${parsedUrl.host} protocols=[${protocols.map((protocol) => this.redactProtocol(protocol)).join(", ")}] pairing=${this.pairingId.slice(0, 8)}…`,
+      `[Signaling] Connecting host=${parsedUrl.host} protocol=${this.redactProtocol(protocol)} headers={${this.summarizeHeaders(headers)}} pairing=${this.pairingId.slice(0, 8)}…`,
     );
 
     await new Promise<void>((resolve, reject) => {
-      const urlHost = parsedUrl.host;
-
-      const ws = new WebSocket(url, protocols, {
+      const ws = new WebSocket(url, protocol, {
         rejectUnauthorized: false,
-        origin: GFN_PLAY_ORIGIN,
-        headers: { Host: urlHost },
+        headers,
       });
 
       this.ws = ws;
@@ -370,7 +360,7 @@ export class GfnSignalingClient {
     this.sendJson({
       peer_msg: {
         from: this.peerId,
-        to: this.getRemotePeerTargetId(),
+        to: 1,
         msg: JSON.stringify(answer),
       },
       ackid: this.nextAckId(),
@@ -384,7 +374,7 @@ export class GfnSignalingClient {
     this.sendJson({
       peer_msg: {
         from: this.peerId,
-        to: this.getRemotePeerTargetId(),
+        to: 1,
         msg: JSON.stringify({
           candidate: candidate.candidate,
           sdpMid: candidate.sdpMid,
@@ -399,7 +389,7 @@ export class GfnSignalingClient {
     this.sendJson({
       peer_msg: {
         from: this.peerId,
-        to: this.getRemotePeerTargetId(),
+        to: 1,
         msg: JSON.stringify({
           type: "request_keyframe",
           reason: payload.reason,

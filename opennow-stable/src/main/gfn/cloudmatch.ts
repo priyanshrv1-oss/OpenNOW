@@ -190,20 +190,20 @@ function streamingServerIp(response: CloudMatchResponse): string | null {
  * Matches Rust's extract_host_from_url().
  */
 function extractHostFromUrl(url: string): string | null {
-  const prefixes = ["rtsps://", "rtsp://", "wss://", "https://"];
-  let afterProto: string | null = null;
-  for (const prefix of prefixes) {
-    if (url.startsWith(prefix)) {
-      afterProto = url.slice(prefix.length);
-      break;
-    }
+  if (!/^(rtsps?|wss?|https?):\/\//i.test(url)) {
+    return null;
   }
-  if (!afterProto) return null;
 
-  // Get host (before port or path)
-  const host = afterProto.split(":")[0]?.split("/")[0];
-  if (!host || host.length === 0 || host.startsWith(".")) return null;
-  return host;
+  try {
+    const parsed = new URL(url.replace(/^rtsps:/i, "https:").replace(/^rtsp:/i, "http:"));
+    const host = parsed.hostname;
+    if (!host || host.length === 0 || host.startsWith(".")) {
+      return null;
+    }
+    return host;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -405,7 +405,9 @@ function buildSignalingUrl(
     try {
       const parsed = new URL(raw.replace(/^rtsps:/i, "https:").replace(/^rtsp:/i, "http:"));
       const protocol = parsed.protocol === "http:" ? "ws" : "wss";
-      const host = parsed.hostname || explicitIp || serverIp;
+      const host = parsed.hostname && !parsed.hostname.startsWith(".")
+        ? parsed.hostname
+        : explicitIp || serverIp;
       const port = parsed.port ? Number.parseInt(parsed.port, 10) : defaultPort;
       const path = parsed.pathname && parsed.pathname.length > 0 ? parsed.pathname : "/nvst";
       const search = parsed.search ?? "";
