@@ -210,6 +210,52 @@ interface ClientOptions {
   onMicStateChange?: (state: MicStateChange) => void;
 }
 
+interface CumulativeVideoStatsSample {
+  bytesReceived: number;
+  framesReceived: number;
+  framesDecoded: number;
+  framesDropped: number;
+  packetsReceived: number;
+  packetsLost: number;
+  totalDecodeTime: number;
+  atMs: number;
+}
+
+interface RecentVideoIntervalSample {
+  intervalMs: number;
+  receivedDelta: number;
+  decodedDelta: number;
+  droppedDelta: number;
+  packetsReceivedDelta: number;
+  packetsLostDelta: number;
+  decodeTimeDelta: number;
+  atMs: number;
+}
+
+interface RecentVideoWindowMetrics {
+  intervalMs: number;
+  pollCount: number;
+  receivedFrames: number;
+  decodedFrames: number;
+  droppedFrames: number;
+  packetsReceived: number;
+  packetsLost: number;
+  receiveFps: number;
+  decodeOutputFps: number;
+  recentDecodeTimeMs: number;
+  decodeDeficitFrames: number;
+  dropRatePercent: number;
+  idleDecodePollsWhileReceiving: number;
+}
+
+interface DecoderPressureSignal {
+  active: boolean;
+  reason: string;
+  recentDeficitFrames: number;
+  dropRatePercent: number;
+  detail: string;
+}
+
 function timestampUs(sourceTimestampMs?: number): bigint {
   const base =
     typeof sourceTimestampMs === "number" && Number.isFinite(sourceTimestampMs) && sourceTimestampMs >= 0
@@ -481,6 +527,11 @@ export class GfnWebRtcClient {
   private static readonly AUDIO_BASE_JITTER_TARGET_MS = 20;
   private static readonly VIDEO_PRESSURE_JITTER_TARGET_MS = 30;
   private static readonly AUDIO_PRESSURE_JITTER_TARGET_MS = 32;
+  private static readonly RECENT_VIDEO_WINDOW_MS = 1600;
+  private static readonly DECODER_STALL_MIN_WINDOW_MS = 900;
+  private static readonly DECODER_STALL_MIN_RECEIVED_FRAMES = 24;
+  private static readonly DECODER_RECENT_DEFICIT_MIN_FRAMES = 12;
+  private static readonly DECODER_RECENT_DROP_BURST_MIN_FRAMES = 6;
   private static readonly DECODER_PRESSURE_CONSECUTIVE_POLLS = 3;
   private static readonly DECODER_STABLE_CONSECUTIVE_POLLS = 6;
   private static readonly DECODER_RECOVERY_COOLDOWN_MS = 1500;
@@ -493,15 +544,8 @@ export class GfnWebRtcClient {
   private gamepadBitmap = 0;
 
   // Stats tracking
-  private lastStatsSample: {
-    bytesReceived: number;
-    framesReceived: number;
-    framesDecoded: number;
-    framesDropped: number;
-    packetsReceived: number;
-    packetsLost: number;
-    atMs: number;
-  } | null = null;
+  private lastStatsSample: CumulativeVideoStatsSample | null = null;
+  private recentVideoIntervalSamples: RecentVideoIntervalSample[] = [];
   private renderFpsCounter = { frames: 0, lastUpdate: 0, fps: 0 };
   private connectedGamepads: Set<number> = new Set();
   private previousGamepadStates: Map<number, GamepadInput> = new Map();
@@ -822,6 +866,7 @@ export class GfnWebRtcClient {
 
   private resetDiagnostics(): void {
     this.lastStatsSample = null;
+    this.recentVideoIntervalSamples = [];
     this.currentCodec = "";
     this.currentResolution = "";
     this.isHdr = false;
@@ -936,69 +981,146 @@ export class GfnWebRtcClient {
     }
   }
 
+  private appendRecentVideoIntervalSample(sample: RecentVideoIntervalSample): void {
+    this.recentVideoIntervalSamples.push(sample);
+    const cutoffMs = sample.atMs - GfnWebRtcClient.RECENT_VIDEO_WINDOW_MS;
+    this.recentVideoIntervalSamples = this.recentVideoIntervalSamples.filter((entry) => entry.atMs > cutoffMs);
+  }
+
+  private summarizeRecentVideoWindow(): RecentVideoWindowMetrics | null {
+    if (this.recentVideoIntervalSamples.length === 0) {
+      return null;
+    }
+
+    let intervalMs = 0;
+    let receivedFrames = 0;
+    let decodedFrames = 0;
+    let droppedFrames = 0;
+    let packetsReceived = 0;
+    let packetsLost = 0;
+    let decodeTimeDelta = 0;
+    let idleDecodePollsWhileReceiving = 0;
+
+    for (const sample of this.recentVideoIntervalSamples) {
+      intervalMs += sample.intervalMs;
+      receivedFrames += sample.receivedDelta;
+      decodedFrames += sample.decodedDelta;
+      droppedFrames += sample.droppedDelta;
+      packetsReceived += sample.packetsReceivedDelta;
+      packetsLost += sample.packetsLostDelta;
+      decodeTimeDelta += sample.decodeTimeDelta;
+      if (sample.receivedDelta >= 4 && sample.decodedDelta === 0) {
+        idleDecodePollsWhileReceiving++;
+      }
+    }
+
+    if (intervalMs <= 0) {
+      return null;
+    }
+
+    return {
+      intervalMs,
+      pollCount: this.recentVideoIntervalSamples.length,
+      receivedFrames,
+      decodedFrames,
+      droppedFrames,
+      packetsReceived,
+      packetsLost,
+      receiveFps: (receivedFrames * 1000) / intervalMs,
+      decodeOutputFps: (decodedFrames * 1000) / intervalMs,
+      recentDecodeTimeMs: decodedFrames > 0 ? (decodeTimeDelta / decodedFrames) * 1000 : 0,
+      decodeDeficitFrames: Math.max(0, receivedFrames - decodedFrames),
+      dropRatePercent: receivedFrames > 0 ? (droppedFrames / receivedFrames) * 100 : 0,
+      idleDecodePollsWhileReceiving,
+    };
+  }
+
   private shouldTreatAsDecoderPressure(params: {
-    framesReceived: number;
-    framesDecoded: number;
-    framesDropped: number;
     decodeTimeMs: number;
     decodeFps: number;
-    prevSample: {
-      framesReceived: number;
-      framesDecoded: number;
-      framesDropped: number;
-    } | null;
-  }): { active: boolean; reason: string; backlogFrames: number; dropRatePercent: number } {
-    const backlogFrames = Math.max(0, params.framesReceived - params.framesDecoded);
-    const dropRatePercent = params.framesReceived > 0
-      ? (params.framesDropped / params.framesReceived) * 100
-      : 0;
-    const severeStall = params.framesReceived > 120 && params.framesDecoded === 0;
-    const backlogHigh = backlogFrames >= 45;
-    const dropRateHigh = dropRatePercent >= 6;
-
-    let dropBurst = false;
-    if (params.prevSample) {
-      const decodedDelta = params.framesDecoded - params.prevSample.framesDecoded;
-      const droppedDelta = params.framesDropped - params.prevSample.framesDropped;
-      dropBurst = droppedDelta >= 8 && decodedDelta <= 4;
+    recentVideo: RecentVideoWindowMetrics | null;
+  }): DecoderPressureSignal {
+    const recent = params.recentVideo;
+    if (!recent || recent.intervalMs < 400 || recent.receivedFrames <= 0) {
+      return {
+        active: false,
+        reason: "stable",
+        recentDeficitFrames: 0,
+        dropRatePercent: 0,
+        detail: "No recent decoder pressure",
+      };
     }
 
-    let decodeSaturated = false;
-    if (params.decodeFps > 0 && params.decodeTimeMs > 0) {
-      const frameBudgetMs = 1000 / params.decodeFps;
-      decodeSaturated = params.decodeTimeMs >= frameBudgetMs * 0.82;
-    }
+    const recentDeficitFrames = recent.decodeDeficitFrames;
+    const referenceFps = Math.max(params.decodeFps, recent.receiveFps, recent.decodeOutputFps);
+    const frameBudgetMs = referenceFps > 0 ? 1000 / referenceFps : 0;
+    const decodeTimeMs = recent.recentDecodeTimeMs > 0 ? recent.recentDecodeTimeMs : params.decodeTimeMs;
+    const decodeSaturated =
+      frameBudgetMs > 0 &&
+      decodeTimeMs > 0 &&
+      decodeTimeMs >= frameBudgetMs * 0.82;
+    const severeStall =
+      recent.pollCount >= 2 &&
+      recent.intervalMs >= GfnWebRtcClient.DECODER_STALL_MIN_WINDOW_MS &&
+      recent.receivedFrames >= GfnWebRtcClient.DECODER_STALL_MIN_RECEIVED_FRAMES &&
+      recent.decodedFrames === 0 &&
+      recent.idleDecodePollsWhileReceiving >= 2;
+    const deficitHigh =
+      recentDeficitFrames >= Math.max(
+        GfnWebRtcClient.DECODER_RECENT_DEFICIT_MIN_FRAMES,
+        Math.round(recent.receiveFps * 0.2),
+      );
+    const dropBurst =
+      recent.droppedFrames >= Math.max(
+        GfnWebRtcClient.DECODER_RECENT_DROP_BURST_MIN_FRAMES,
+        Math.round(recent.receiveFps * 0.12),
+      ) ||
+      (recent.dropRatePercent >= 8 && recent.droppedFrames >= 4);
+    const lowDecodeOutput = recent.decodedFrames <= Math.max(4, Math.round(recent.receivedFrames * 0.4));
 
     if (severeStall) {
       return {
         active: true,
-        reason: "severe_stall",
-        backlogFrames,
-        dropRatePercent,
+        reason: "recent_stall",
+        recentDeficitFrames,
+        dropRatePercent: recent.dropRatePercent,
+        detail: `no decodes for ${recent.intervalMs.toFixed(0)}ms while receiving ${recent.receivedFrames} frames`,
       };
     }
 
-    const active = (backlogHigh && (dropRateHigh || dropBurst || decodeSaturated))
-      || (dropBurst && decodeSaturated);
-    const reason = active
-      ? (backlogHigh
-        ? "backlog_and_drop"
-        : "decode_saturated")
-      : "stable";
+    if (decodeSaturated && (deficitHigh || dropBurst)) {
+      const detailParts = [`decode ${decodeTimeMs.toFixed(1)}ms`];
+      if (recentDeficitFrames > 0) detailParts.push(`recent deficit ${recentDeficitFrames}`);
+      if (recent.droppedFrames > 0) detailParts.push(`recent drops ${recent.droppedFrames}`);
+      return {
+        active: true,
+        reason: "recent_saturation",
+        recentDeficitFrames,
+        dropRatePercent: recent.dropRatePercent,
+        detail: detailParts.join(" · "),
+      };
+    }
+
+    if (dropBurst && lowDecodeOutput) {
+      return {
+        active: true,
+        reason: "recent_drop_burst",
+        recentDeficitFrames,
+        dropRatePercent: recent.dropRatePercent,
+        detail: `recent drops ${recent.droppedFrames} (${recent.dropRatePercent.toFixed(1)}%) · decoded ${recent.decodedFrames}/${recent.receivedFrames}`,
+      };
+    }
 
     return {
-      active,
-      reason,
-      backlogFrames,
-      dropRatePercent,
+      active: false,
+      reason: "stable",
+      recentDeficitFrames,
+      dropRatePercent: recent.dropRatePercent,
+      detail: "No recent decoder pressure",
     };
   }
 
   private classifyLagReason(params: {
-    framesReceived: number;
-    framesDecoded: number;
-    framesDropped: number;
-    decodeTimeMs: number;
     decodeFps: number;
     renderFps: number;
     rttMs: number;
@@ -1008,6 +1130,7 @@ export class GfnWebRtcClient {
     inputQueueBufferedBytes: number;
     inputQueueDropCount: number;
     inputQueueMaxSchedulingDelayMs: number;
+    decoderPressure: DecoderPressureSignal;
   }): { reason: StreamLagReason; detail: string } {
     const networkSignals: string[] = [];
     if (params.packetLossPercent >= 1) networkSignals.push(`${params.packetLossPercent.toFixed(1)}% loss`);
@@ -1021,22 +1144,10 @@ export class GfnWebRtcClient {
       };
     }
 
-    const frameBudgetMs = params.decodeFps > 0 ? 1000 / params.decodeFps : 0;
-    const decodeSaturated =
-      frameBudgetMs > 0 &&
-      params.decodeTimeMs > 0 &&
-      params.decodeTimeMs >= frameBudgetMs * 0.82;
-    const severeDecoderStall = params.framesReceived > 100 && params.framesDecoded === 0;
-    const decoderBacklog = Math.max(0, params.framesReceived - params.framesDecoded);
-    if (severeDecoderStall || decodeSaturated || decoderBacklog >= 45 || params.framesDropped >= 8) {
-      const detailParts: string[] = [];
-      if (severeDecoderStall) detailParts.push("frames received but not decoded");
-      if (decodeSaturated) detailParts.push(`decode ${params.decodeTimeMs.toFixed(1)}ms`);
-      if (decoderBacklog >= 45) detailParts.push(`backlog ${decoderBacklog}`);
-      if (params.framesDropped >= 8) detailParts.push(`drops ${params.framesDropped}`);
+    if (params.decoderPressure.active) {
       return {
         reason: "decoder",
-        detail: detailParts.join(" · ") || "decode saturation",
+        detail: params.decoderPressure.detail,
       };
     }
 
@@ -1077,7 +1188,7 @@ export class GfnWebRtcClient {
     };
   }
 
-  private async requestDecoderKeyframe(backlogFrames: number, reason: string): Promise<boolean> {
+  private async requestDecoderKeyframe(recentDeficitFrames: number, reason: string): Promise<boolean> {
     const now = performance.now();
     if (now - this.lastDecoderKeyframeRequestAtMs < GfnWebRtcClient.DECODER_KEYFRAME_COOLDOWN_MS) {
       return false;
@@ -1109,7 +1220,9 @@ export class GfnWebRtcClient {
         this.controlChannel.send(JSON.stringify({
           type: "request_keyframe",
           reason,
-          backlogFrames,
+          // Kept as backlogFrames for signaling compatibility; this is a recent
+          // short-window decode deficit estimate, not lifetime framesReceived - framesDecoded.
+          backlogFrames: recentDeficitFrames,
           attempt: this.decoderRecoveryAttemptCount + 1,
         }));
         requestedViaSender = true;
@@ -1123,7 +1236,7 @@ export class GfnWebRtcClient {
       try {
         await window.openNow.requestKeyframe({
           reason,
-          backlogFrames,
+          backlogFrames: recentDeficitFrames,
           attempt: this.decoderRecoveryAttemptCount + 1,
         });
         requestedViaSender = true;
@@ -1139,7 +1252,7 @@ export class GfnWebRtcClient {
         this.diagnostics.decoderRecoveryAction = "sender_keyframe";
       }
       this.log(
-        `Decoder recovery: keyframe requested (reason=${reason}, backlog=${backlogFrames}, attempt=${this.decoderRecoveryAttemptCount + 1})`,
+        `Decoder recovery: keyframe requested (reason=${reason}, recentDeficit=${recentDeficitFrames}, attempt=${this.decoderRecoveryAttemptCount + 1})`,
       );
       return true;
     }
@@ -1177,8 +1290,9 @@ export class GfnWebRtcClient {
   private async maybeRecoverFromDecoderPressure(signal: {
     active: boolean;
     reason: string;
-    backlogFrames: number;
+    recentDeficitFrames: number;
     dropRatePercent: number;
+    detail: string;
   }): Promise<void> {
     if (!signal.active) {
       this.decoderPressureConsecutivePolls = 0;
@@ -1206,7 +1320,7 @@ export class GfnWebRtcClient {
       return;
     }
 
-    const keyframeRequested = await this.requestDecoderKeyframe(signal.backlogFrames, signal.reason);
+    const keyframeRequested = await this.requestDecoderKeyframe(signal.recentDeficitFrames, signal.reason);
 
     let bitrateReduced = false;
     if (!keyframeRequested || this.decoderRecoveryAttemptCount >= 1) {
@@ -1218,7 +1332,7 @@ export class GfnWebRtcClient {
       this.diagnostics.decoderRecoveryAttempts = this.decoderRecoveryAttemptCount;
       this.lastDecoderRecoveryAtMs = now;
       this.log(
-        `Decoder pressure detected: reason=${signal.reason}, backlog=${signal.backlogFrames}, dropRate=${signal.dropRatePercent.toFixed(1)}%, recoveryAttempt=${this.decoderRecoveryAttemptCount}`,
+        `Decoder pressure detected: reason=${signal.reason}, recentDeficit=${signal.recentDeficitFrames}, dropRate=${signal.dropRatePercent.toFixed(1)}%, recoveryAttempt=${this.decoderRecoveryAttemptCount}`,
       );
     }
   }
@@ -1236,6 +1350,13 @@ export class GfnWebRtcClient {
     let framesReceived = 0;
     let framesDecoded = 0;
     let framesDropped = 0;
+    let decoderPressureSignal: DecoderPressureSignal = {
+      active: false,
+      reason: "stable",
+      recentDeficitFrames: 0,
+      dropRatePercent: 0,
+      detail: "No recent decoder pressure",
+    };
 
     for (const entry of report.values()) {
       const stats = entry as unknown as Record<string, unknown>;
@@ -1265,29 +1386,57 @@ export class GfnWebRtcClient {
       framesDropped = Number(inboundVideo.framesDropped ?? 0);
       const packetsReceived = Number(inboundVideo.packetsReceived ?? 0);
       const packetsLost = Number(inboundVideo.packetsLost ?? 0);
+      const totalDecodeTime = Number(inboundVideo.totalDecodeTime ?? 0);
       const prevSample = this.lastStatsSample;
+      let recentVideo = this.summarizeRecentVideoWindow();
 
-      // Calculate bitrate
       if (prevSample) {
-        const bytesDelta = bytes - prevSample.bytesReceived;
+        const countersReset =
+          bytes < prevSample.bytesReceived ||
+          framesReceived < prevSample.framesReceived ||
+          framesDecoded < prevSample.framesDecoded ||
+          framesDropped < prevSample.framesDropped ||
+          packetsReceived < prevSample.packetsReceived ||
+          packetsLost < prevSample.packetsLost;
         const timeDeltaMs = now - prevSample.atMs;
-        if (bytesDelta >= 0 && timeDeltaMs > 0) {
-          const kbps = (bytesDelta * 8) / (timeDeltaMs / 1000) / 1000;
-          this.diagnostics.bitrateKbps = Math.max(0, Math.round(kbps));
-        }
 
-        // Calculate packet loss percentage over the interval
-        const packetsDelta = packetsReceived - prevSample.packetsReceived;
-        const lostDelta = packetsLost - prevSample.packetsLost;
-        if (packetsDelta > 0) {
+        // WebRTC inbound video counters are cumulative for the life of the RTP
+        // stream. Use interval deltas plus a short rolling window so historical
+        // drops or decode deficits do not stick around as fake decoder backlog.
+        if (countersReset) {
+          this.recentVideoIntervalSamples = [];
+          recentVideo = null;
+        } else if (timeDeltaMs > 0) {
+          const bytesDelta = bytes - prevSample.bytesReceived;
+          const packetsDelta = packetsReceived - prevSample.packetsReceived;
+          const lostDelta = packetsLost - prevSample.packetsLost;
+          const decodeTimeDelta = Math.max(0, totalDecodeTime - prevSample.totalDecodeTime);
+
+          this.appendRecentVideoIntervalSample({
+            intervalMs: timeDeltaMs,
+            receivedDelta: framesReceived - prevSample.framesReceived,
+            decodedDelta: framesDecoded - prevSample.framesDecoded,
+            droppedDelta: framesDropped - prevSample.framesDropped,
+            packetsReceivedDelta: packetsDelta,
+            packetsLostDelta: lostDelta,
+            decodeTimeDelta,
+            atMs: now,
+          });
+          recentVideo = this.summarizeRecentVideoWindow();
+
+          if (bytesDelta >= 0) {
+            const kbps = (bytesDelta * 8) / (timeDeltaMs / 1000) / 1000;
+            this.diagnostics.bitrateKbps = Math.max(0, Math.round(kbps));
+          }
+
           const totalPackets = packetsDelta + lostDelta;
-          this.diagnostics.packetLossPercent = totalPackets > 0
-            ? (lostDelta / totalPackets) * 100
-            : 0;
+          if (totalPackets > 0) {
+            this.diagnostics.packetLossPercent = (lostDelta / totalPackets) * 100;
+          }
         }
       }
 
-      // Store current values for next delta calculation
+      // Store current values for next interval derivation.
       this.lastStatsSample = {
         bytesReceived: bytes,
         framesReceived,
@@ -1295,22 +1444,14 @@ export class GfnWebRtcClient {
         framesDropped,
         packetsReceived,
         packetsLost,
+        totalDecodeTime,
         atMs: now,
       };
 
-      // Frame counters
+      // Keep raw cumulative counters visible in diagnostics.
       this.diagnostics.framesReceived = framesReceived;
       this.diagnostics.framesDecoded = framesDecoded;
       this.diagnostics.framesDropped = framesDropped;
-
-      if (
-        !this.videoDecodeStallWarningSent &&
-        framesReceived > 100 &&
-        framesDecoded === 0
-      ) {
-        this.videoDecodeStallWarningSent = true;
-        this.log("Warning: inbound video packets received but 0 frames decoded (decoder stall)");
-      }
 
       // Decode FPS
       this.diagnostics.decodeFps = Math.round(Number(inboundVideo.framesPerSecond ?? 0));
@@ -1374,7 +1515,6 @@ export class GfnWebRtcClient {
       }
 
       // Get decode timing if available
-      const totalDecodeTime = Number(inboundVideo.totalDecodeTime ?? 0);
       const totalInterFrameDelay = Number(inboundVideo.totalInterFrameDelay ?? 0);
       const framesDecodedForTiming = Number(inboundVideo.framesDecoded ?? 1);
 
@@ -1388,15 +1528,22 @@ export class GfnWebRtcClient {
         this.diagnostics.renderTimeMs = Math.round(avgFrameDelay * 1000 * 10) / 10;
       }
 
-      const pressureSignal = this.shouldTreatAsDecoderPressure({
-        framesReceived,
-        framesDecoded,
-        framesDropped,
+      decoderPressureSignal = this.shouldTreatAsDecoderPressure({
         decodeTimeMs: this.diagnostics.decodeTimeMs,
         decodeFps: this.diagnostics.decodeFps,
-        prevSample,
+        recentVideo,
       });
-      await this.maybeRecoverFromDecoderPressure(pressureSignal);
+
+      if (decoderPressureSignal.reason === "recent_stall") {
+        if (!this.videoDecodeStallWarningSent) {
+          this.videoDecodeStallWarningSent = true;
+          this.log(`Warning: recent decoder stall detected (${decoderPressureSignal.detail})`);
+        }
+      } else {
+        this.videoDecodeStallWarningSent = false;
+      }
+
+      await this.maybeRecoverFromDecoderPressure(decoderPressureSignal);
     }
 
     // RTT from active candidate pair
@@ -1417,10 +1564,6 @@ export class GfnWebRtcClient {
       Math.round(this.inputQueueMaxSchedulingDelayMsWindow * 10) / 10;
 
     const lagClassification = this.classifyLagReason({
-      framesReceived,
-      framesDecoded,
-      framesDropped,
-      decodeTimeMs: this.diagnostics.decodeTimeMs,
       decodeFps: this.diagnostics.decodeFps,
       renderFps: this.diagnostics.renderFps,
       rttMs: this.diagnostics.rttMs,
@@ -1430,6 +1573,7 @@ export class GfnWebRtcClient {
       inputQueueBufferedBytes: reliableBufferedAmount,
       inputQueueDropCount: this.inputQueueDropCount,
       inputQueueMaxSchedulingDelayMs: this.diagnostics.inputQueueMaxSchedulingDelayMs,
+      decoderPressure: decoderPressureSignal,
     });
     this.diagnostics.lagReason = lagClassification.reason;
     this.diagnostics.lagReasonDetail = lagClassification.detail;

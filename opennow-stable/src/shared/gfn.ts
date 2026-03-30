@@ -334,6 +334,7 @@ export interface SendAnswerRequest {
 
 export interface KeyframeRequest {
   reason: string;
+  /** Recent short-window decode deficit estimate kept as backlogFrames for signaling compatibility. */
   backlogFrames: number;
   attempt: number;
 }
