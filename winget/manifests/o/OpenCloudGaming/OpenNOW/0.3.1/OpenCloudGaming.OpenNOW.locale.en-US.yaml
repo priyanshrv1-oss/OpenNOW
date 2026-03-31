@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.9.0.schema.json
+
+PackageIdentifier: OpenCloudGaming.OpenNOW
+PackageVersion: 0.3.1
+PackageLocale: en-US
+Publisher: OpenCloud Gaming
+PublisherUrl: https://github.com/OpenCloudGaming
+Author: zortos293
+PackageName: OpenNOW
+PackageUrl: https://github.com/OpenCloudGaming/OpenNOW
+License: MIT
+LicenseUrl: https://github.com/OpenCloudGaming/OpenNOW/blob/main/LICENSE
+Copyright: Copyright (c) Zortos
+ShortDescription: Open-source desktop client for NVIDIA GeForce NOW
+Description: |-
+  OpenNOW is an independent, community-built desktop client for NVIDIA GeForce NOW.
+  It is built with Electron and TypeScript and is not affiliated with NVIDIA Corporation.
+Moniker: opennow
+Tags:
+  - cloud-gaming
+  - electron
+  - games
+  - geforce-now
+  - nvidia
+  - open-source
+  - streaming
+ReleaseNotesUrl: https://github.com/OpenCloudGaming/OpenNOW/releases/tag/v0.3.1
+ManifestType: defaultLocale
+ManifestVersion: 1.9.0

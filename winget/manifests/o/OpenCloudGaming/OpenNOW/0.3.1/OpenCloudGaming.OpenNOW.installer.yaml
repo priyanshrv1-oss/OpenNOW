@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.9.0.schema.json
+
+PackageIdentifier: OpenCloudGaming.OpenNOW
+PackageVersion: 0.3.1
+InstallerType: nullsoft
+Scope: user
+InstallModes:
+  - interactive
+  - silent
+UpgradeBehavior: install
+ReleaseDate: 2026-03-30
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/OpenCloudGaming/OpenNOW/releases/download/v0.3.1/OpenNOW-v0.3.1-setup-x64.exe
+    InstallerSha256: DE76A5832AC94BF40182BC936F40C173CEA844490884C2EE56BCB03BE95DD27F
+ManifestType: installer
+ManifestVersion: 1.9.0
