@@ -305,6 +305,11 @@ export class StreamerManager {
     }
 
     if (parsed.type === "answer" && parsed.sdp) {
+      this.emit({
+        type: "log",
+        level: "info",
+        message: `forwarding native answer (${parsed.sdp.length} chars, nvst=${parsed.nvstSdp?.length ?? 0} chars)`,
+      });
       void this.signalingHandlers.sendAnswer({ sdp: parsed.sdp, nvstSdp: parsed.nvstSdp }).catch((error) => {
         this.emit({ type: "error", message: `Failed to forward native answer: ${String(error)}` });
       });
@@ -312,6 +317,11 @@ export class StreamerManager {
     }
 
     if (parsed.type === "local-ice" && parsed.candidate) {
+      this.emit({
+        type: "log",
+        level: "info",
+        message: `forwarding native ICE candidate (mid=${parsed.sdpMid ?? "null"}, mline=${parsed.sdpMLineIndex ?? "null"})`,
+      });
       void this.signalingHandlers.sendIceCandidate({
         candidate: parsed.candidate,
         sdpMid: parsed.sdpMid,

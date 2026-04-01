@@ -47,7 +47,13 @@ pub struct StreamSettings {
 pub enum ControlMessage {
     Configure { session: SessionInfo, settings: StreamSettings },
     SignalingOffer { sdp: String },
-    SignalingRemoteIce { candidate: String, sdp_mid: Option<String>, sdp_m_line_index: Option<u16> },
+    SignalingRemoteIce {
+        candidate: String,
+        #[serde(rename = "sdpMid")]
+        sdp_mid: Option<String>,
+        #[serde(rename = "sdpMLineIndex")]
+        sdp_m_line_index: Option<u16>,
+    },
     Stop,
     Ping,
 }
@@ -58,8 +64,18 @@ pub enum StreamerMessage {
     Hello { version: u32, pid: u32 },
     Log { level: String, message: String },
     State { state: StreamerState, detail: Option<String> },
-    Answer { sdp: String, nvst_sdp: String },
-    LocalIce { candidate: String, sdp_mid: Option<String>, sdp_m_line_index: Option<u16> },
+    Answer {
+        sdp: String,
+        #[serde(rename = "nvstSdp")]
+        nvst_sdp: String,
+    },
+    LocalIce {
+        candidate: String,
+        #[serde(rename = "sdpMid")]
+        sdp_mid: Option<String>,
+        #[serde(rename = "sdpMLineIndex")]
+        sdp_m_line_index: Option<u16>,
+    },
     Error { message: String },
 }
 
