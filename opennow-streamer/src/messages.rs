@@ -38,6 +38,7 @@ pub struct StreamSettings {
     pub max_bitrate_mbps: u16,
     pub codec: String,
     pub color_quality: String,
+    #[serde(default, alias = "enableL4S", alias = "enableL4s")]
     pub enable_l4s: bool,
 }
 
