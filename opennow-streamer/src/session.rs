@@ -154,10 +154,10 @@ impl StreamSession {
             level: "info".into(),
             message: "creating local answer".into(),
         }).await.ok();
-        let mut answer = timeout(Duration::from_secs(5), self.peer.create_answer(None))
+        let answer = timeout(Duration::from_secs(5), self.peer.create_answer(None))
             .await
             .map_err(|_| anyhow!("timed out creating answer"))??;
-        answer.sdp = munge_answer_sdp(&answer.sdp, u32::from(self.settings.max_bitrate_mbps) * 1000);
+        let mut gather_complete = self.peer.gathering_complete_promise().await;
         self.control_tx.send(StreamerMessage::Log {
             level: "info".into(),
             message: format!("setting local description ({} chars)", answer.sdp.len()),
@@ -169,7 +169,15 @@ impl StreamSession {
             level: "info".into(),
             message: "local description applied".into(),
         }).await.ok();
+        let _ = timeout(Duration::from_secs(5), gather_complete.recv())
+            .await
+            .map_err(|_| anyhow!("timed out waiting for ICE gathering"))?;
+        self.control_tx.send(StreamerMessage::Log {
+            level: "info".into(),
+            message: "ice gathering completed".into(),
+        }).await.ok();
         let local = self.peer.local_description().await.ok_or_else(|| anyhow!("missing local description"))?;
+        let munged_local_sdp = munge_answer_sdp(&local.sdp, u32::from(self.settings.max_bitrate_mbps) * 1000);
         let nvst = build_nvst_sdp(
             &self.settings.resolution,
             self.settings.fps,
@@ -181,9 +189,9 @@ impl StreamSession {
         );
         self.control_tx.send(StreamerMessage::Log {
             level: "info".into(),
-            message: format!("sending local answer ({} chars) and nvst blob ({} chars)", local.sdp.len(), nvst.len()),
+            message: format!("sending local answer ({} chars) and nvst blob ({} chars)", munged_local_sdp.len(), nvst.len()),
         }).await.ok();
-        self.control_tx.send(StreamerMessage::Answer { sdp: local.sdp.clone(), nvst_sdp: nvst }).await.ok();
+        self.control_tx.send(StreamerMessage::Answer { sdp: munged_local_sdp, nvst_sdp: nvst }).await.ok();
 
         if let Some(mci) = &self.session.media_connection_info {
             if let Some(ip) = extract_public_ip(&mci.ip) {
