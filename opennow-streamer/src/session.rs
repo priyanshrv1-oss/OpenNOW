@@ -1,9 +1,10 @@
 use std::{sync::{Arc, mpsc::Sender as StdSender}};
 
 use anyhow::{anyhow, Context};
-use tokio::sync::{mpsc, Mutex};
+use interceptor::registry::Registry;
+use tokio::{sync::{mpsc, Mutex}, time::{timeout, Duration}};
 use webrtc::{
-    api::{media_engine::MediaEngine, APIBuilder},
+    api::{interceptor_registry::register_default_interceptors, media_engine::MediaEngine, APIBuilder},
     data_channel::{data_channel_init::RTCDataChannelInit, RTCDataChannel},
     ice_transport::{ice_candidate::RTCIceCandidateInit, ice_server::RTCIceServer},
     peer_connection::{configuration::RTCConfiguration, sdp::session_description::RTCSessionDescription, RTCPeerConnection},
@@ -36,7 +37,12 @@ impl StreamSession {
     ) -> anyhow::Result<Self> {
         let mut media_engine = MediaEngine::default();
         media_engine.register_default_codecs().context("register_default_codecs")?;
-        let api = APIBuilder::new().with_media_engine(media_engine).build();
+        let mut registry = Registry::new();
+        registry = register_default_interceptors(registry, &mut media_engine).context("register_default_interceptors")?;
+        let api = APIBuilder::new()
+            .with_media_engine(media_engine)
+            .with_interceptor_registry(registry)
+            .build();
         let config = RTCConfiguration {
             ice_servers: session.ice_servers.iter().map(|server| RTCIceServer {
                 urls: server.urls.clone(),
@@ -132,10 +138,37 @@ impl StreamSession {
         processed = prefer_codec(&processed, &self.settings.codec);
         let server_ufrag = extract_ice_ufrag_from_offer(&processed);
 
-        self.peer.set_remote_description(RTCSessionDescription::offer(processed)?).await?;
-        let mut answer = self.peer.create_answer(None).await?;
+        self.control_tx.send(StreamerMessage::Log {
+            level: "info".into(),
+            message: format!("setting remote description ({} chars)", processed.len()),
+        }).await.ok();
+        timeout(Duration::from_secs(5), self.peer.set_remote_description(RTCSessionDescription::offer(processed)?))
+            .await
+            .map_err(|_| anyhow!("timed out setting remote description"))??;
+        self.control_tx.send(StreamerMessage::Log {
+            level: "info".into(),
+            message: "remote description applied".into(),
+        }).await.ok();
+
+        self.control_tx.send(StreamerMessage::Log {
+            level: "info".into(),
+            message: "creating local answer".into(),
+        }).await.ok();
+        let mut answer = timeout(Duration::from_secs(5), self.peer.create_answer(None))
+            .await
+            .map_err(|_| anyhow!("timed out creating answer"))??;
         answer.sdp = munge_answer_sdp(&answer.sdp, u32::from(self.settings.max_bitrate_mbps) * 1000);
-        self.peer.set_local_description(answer).await?;
+        self.control_tx.send(StreamerMessage::Log {
+            level: "info".into(),
+            message: format!("setting local description ({} chars)", answer.sdp.len()),
+        }).await.ok();
+        timeout(Duration::from_secs(5), self.peer.set_local_description(answer))
+            .await
+            .map_err(|_| anyhow!("timed out setting local description"))??;
+        self.control_tx.send(StreamerMessage::Log {
+            level: "info".into(),
+            message: "local description applied".into(),
+        }).await.ok();
         let local = self.peer.local_description().await.ok_or_else(|| anyhow!("missing local description"))?;
         let nvst = build_nvst_sdp(
             &self.settings.resolution,

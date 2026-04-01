@@ -2028,6 +2028,7 @@ dependencies = [
  "clap",
  "env_logger",
  "gilrs",
+ "interceptor",
  "log",
  "opus",
  "rtp",
