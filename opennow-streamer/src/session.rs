@@ -4,8 +4,9 @@ use anyhow::{anyhow, Context};
 use interceptor::registry::Registry;
 use tokio::{sync::{mpsc, Mutex}, time::{timeout, Duration}};
 use webrtc::{
-    api::{interceptor_registry::register_default_interceptors, media_engine::MediaEngine, APIBuilder},
+    api::{interceptor_registry::register_default_interceptors, media_engine::MediaEngine, setting_engine::SettingEngine, APIBuilder},
     data_channel::{data_channel_init::RTCDataChannelInit, RTCDataChannel},
+    dtls_transport::dtls_role::DTLSRole,
     ice_transport::{ice_candidate::RTCIceCandidateInit, ice_server::RTCIceServer},
     peer_connection::{configuration::RTCConfiguration, sdp::session_description::RTCSessionDescription, RTCPeerConnection},
     track::track_remote::TrackRemote,
@@ -39,8 +40,13 @@ impl StreamSession {
         media_engine.register_default_codecs().context("register_default_codecs")?;
         let mut registry = Registry::new();
         registry = register_default_interceptors(registry, &mut media_engine).context("register_default_interceptors")?;
+        let mut setting_engine = SettingEngine::default();
+        setting_engine
+            .set_answering_dtls_role(DTLSRole::Client)
+            .context("set_answering_dtls_role")?;
         let api = APIBuilder::new()
             .with_media_engine(media_engine)
+            .with_setting_engine(setting_engine)
             .with_interceptor_registry(registry)
             .build();
         let config = RTCConfiguration {
@@ -251,6 +257,12 @@ impl StreamSession {
         let local = self.peer.local_description().await.ok_or_else(|| anyhow!("missing local description"))?;
         let width = self.settings.resolution.split('x').next().and_then(|v| v.parse::<u32>().ok()).unwrap_or(1920);
         let height = self.settings.resolution.split('x').nth(1).and_then(|v| v.parse::<u32>().ok()).unwrap_or(1080);
+        if let Some(setup_line) = local.sdp.lines().find(|line| line.trim().starts_with("a=setup:")) {
+            self.control_tx.send(StreamerMessage::Log {
+                level: "info".into(),
+                message: format!("local answer DTLS setup line {setup_line}"),
+            }).await.ok();
+        }
         let credentials = extract_ice_credentials(&local.sdp);
         self.control_tx.send(StreamerMessage::Log {
             level: "info".into(),
