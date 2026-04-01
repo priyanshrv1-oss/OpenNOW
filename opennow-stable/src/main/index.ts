@@ -70,6 +70,7 @@ import {
 } from "./gfn/games";
 import { fetchSubscription, fetchDynamicRegions } from "./gfn/subscription";
 import { GfnSignalingClient } from "./gfn/signaling";
+import { StreamerManager } from "./services/streamerManager";
 import { isSessionError, SessionError, GfnErrorCode } from "./gfn/errorCodes";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -187,6 +188,7 @@ let signalingClient: GfnSignalingClient | null = null;
 let signalingClientKey: string | null = null;
 let authService: AuthService;
 let settingsManager: SettingsManager;
+let streamerManager: StreamerManager;
 const SCREENSHOT_LIMIT = 60;
 
 function getScreenshotDirectory(): string {
@@ -481,9 +483,16 @@ async function listRecordings(): Promise<RecordingEntry[]> {
 }
 
 function emitToRenderer(event: MainToRendererSignalingEvent): void {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send(IPC_CHANNELS.SIGNALING_EVENT, event);
-  }
+  void streamerManager?.forwardSignalingEvent(event).then((handled) => {
+    if (!handled && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC_CHANNELS.SIGNALING_EVENT, event);
+    }
+  }).catch((error) => {
+    console.error("[Streamer] Failed to forward signaling event:", error);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC_CHANNELS.SIGNALING_EVENT, event);
+    }
+  });
 }
 
 async function createMainWindow(): Promise<void> {
@@ -767,6 +776,14 @@ function registerIpcHandlers(): void {
       throw new Error("Signaling is not connected");
     }
     return signalingClient.requestKeyframe(payload);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.STREAMER_START, async (_event, payload) => {
+    await streamerManager.start(payload);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.STREAMER_STOP, async (): Promise<void> => {
+    await streamerManager.stop();
   });
 
   // Toggle fullscreen via IPC (for completeness)
@@ -1153,6 +1170,19 @@ app.whenReady().then(async () => {
   await authService.initialize();
 
   settingsManager = getSettingsManager();
+  streamerManager = new StreamerManager(
+    () => mainWindow,
+    {
+      sendAnswer: async (payload) => {
+        if (!signalingClient) throw new Error("Signaling is not connected");
+        await signalingClient.sendAnswer(payload);
+      },
+      sendIceCandidate: async (payload) => {
+        if (!signalingClient) throw new Error("Signaling is not connected");
+        await signalingClient.sendIceCandidate(payload);
+      },
+    },
+  );
 
   // Request microphone permission on macOS at startup
   if (process.platform === "darwin") {
@@ -1247,6 +1277,7 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   refreshScheduler.stop();
+  void streamerManager?.stop();
   signalingClient?.disconnect();
   signalingClient = null;
   signalingClientKey = null;

@@ -9,6 +9,7 @@ import type {
   GameVariant,
   LoginProvider,
   MainToRendererSignalingEvent,
+  MainToRendererStreamerEvent,
   SessionInfo,
   Settings,
   SubscriptionInfo,
@@ -70,6 +71,7 @@ const PLAYTIME_RESYNC_INTERVAL_MS = 5 * 60 * 1000;
 type GameSource = "main" | "library" | "public";
 type AppPage = "home" | "library" | "settings";
 type StreamStatus = "idle" | "queue" | "setup" | "starting" | "connecting" | "streaming";
+type StreamMode = "legacy" | "external";
 type StreamLoadingStatus = "queue" | "setup" | "starting" | "connecting";
 type ExitPromptState = { open: boolean; gameTitle: string };
 type StreamWarningState = {
@@ -426,6 +428,7 @@ export function App(): JSX.Element {
     windowHeight: 900,
     gameLanguage: "en_US",
     enableL4S: false,
+    enableExternalStreamer: false,
   });
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [regions, setRegions] = useState<StreamRegion[]>([]);
@@ -644,6 +647,7 @@ export function App(): JSX.Element {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const clientRef = useRef<GfnWebRtcClient | null>(null);
+  const streamModeRef = useRef<StreamMode>("legacy");
   const sessionRef = useRef<SessionInfo | null>(null);
   const hasInitializedRef = useRef(false);
   const regionsRequestRef = useRef(0);
@@ -727,6 +731,10 @@ export function App(): JSX.Element {
   useEffect(() => {
     streamStatusRef.current = streamStatus;
   }, [streamStatus]);
+
+  useEffect(() => {
+    streamModeRef.current = settings.enableExternalStreamer ? "external" : "legacy";
+  }, [settings.enableExternalStreamer]);
 
   // Broadcast minimal session/loading state for UI overlays (controller + other listeners)
   useEffect(() => {
@@ -1301,6 +1309,32 @@ export function App(): JSX.Element {
     return () => unsubscribe();
   }, [resetLaunchRuntime, settings]);
 
+  useEffect(() => {
+    const unsubscribe = window.openNow.onStreamerEvent((event: MainToRendererStreamerEvent) => {
+      if (event.type === "state") {
+        if (event.state === "connected") {
+          setLaunchError(null);
+          setStreamStatus("streaming");
+        } else if (event.state === "failed") {
+          setLaunchError({
+            stage: "connecting",
+            title: "Native streamer failed",
+            description: event.detail ?? "The external streamer process did not connect successfully.",
+          });
+          resetLaunchRuntime({ keepLaunchError: true, keepStreamingContext: true });
+        } else if (event.state === "disconnected" && streamModeRef.current === "external") {
+          resetLaunchRuntime();
+          launchInFlightRef.current = false;
+        }
+      } else if (event.type === "error") {
+        console.error("Streamer error:", event.message);
+      } else if (event.type === "log") {
+        console.log(`[Streamer:${event.level}] ${event.message}`);
+      }
+    });
+    return () => unsubscribe();
+  }, [resetLaunchRuntime]);
+
   // Save settings when changed
   const updateSetting = useCallback(async <K extends keyof Settings>(key: K, value: Settings[K]) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
@@ -1531,6 +1565,20 @@ export function App(): JSX.Element {
       signalingServer: claimed.signalingServer,
       signalingUrl: claimed.signalingUrl,
     });
+    if (settings.enableExternalStreamer) {
+      await window.openNow.startExternalStreamer({
+        session: claimed,
+        settings: {
+          resolution: settings.resolution,
+          fps: settings.fps,
+          maxBitrateMbps: settings.maxBitrateMbps,
+          codec: settings.codec,
+          colorQuality: settings.colorQuality,
+          gameLanguage: settings.gameLanguage,
+          enableL4S: settings.enableL4S,
+        },
+      });
+    }
   }, [authSession, effectiveStreamingBaseUrl, findGameContextForSession, settings]);
 
   // Play game handler
@@ -1747,12 +1795,27 @@ export function App(): JSX.Element {
         signalingServer: sessionToConnect.signalingServer,
         signalingUrl: sessionToConnect.signalingUrl,
       });
+      if (settings.enableExternalStreamer) {
+        await window.openNow.startExternalStreamer({
+          session: sessionToConnect,
+          settings: {
+            resolution: settings.resolution,
+            fps: settings.fps,
+            maxBitrateMbps: settings.maxBitrateMbps,
+            codec: settings.codec,
+            colorQuality: settings.colorQuality,
+            gameLanguage: settings.gameLanguage,
+            enableL4S: settings.enableL4S,
+          },
+        });
+      }
     } catch (error) {
       if (launchAbortRef.current) {
         return;
       }
       console.error("Launch failed:", error);
       setLaunchError(toLaunchErrorState(error, loadingStep));
+      await window.openNow.stopExternalStreamer().catch(() => {});
       await window.openNow.disconnectSignaling().catch(() => {});
       clientRef.current?.dispose();
       clientRef.current = null;
@@ -1810,6 +1873,7 @@ export function App(): JSX.Element {
     } catch (error) {
       console.error("Navbar resume failed:", error);
       setLaunchError(toLaunchErrorState(error, loadingStep));
+      await window.openNow.stopExternalStreamer().catch(() => {});
       await window.openNow.disconnectSignaling().catch(() => {});
       clientRef.current?.dispose();
       clientRef.current = null;
@@ -1838,6 +1902,7 @@ export function App(): JSX.Element {
       if (status !== "idle" && status !== "streaming") {
         launchAbortRef.current = true;
       }
+      await window.openNow.stopExternalStreamer().catch(() => {});
       await window.openNow.disconnectSignaling();
 
       const current = sessionRef.current;
@@ -2136,7 +2201,7 @@ export function App(): JSX.Element {
     const loadingStatus = launchError ? launchError.stage : toLoadingStatus(streamStatus);
     return (
       <>
-        {streamStatus !== "idle" && (
+        {streamStatus !== "idle" && !settings.enableExternalStreamer && (
           <StreamView
             className={isSwitchingGame ? "sv--switching" : undefined}
             videoRef={videoRef}

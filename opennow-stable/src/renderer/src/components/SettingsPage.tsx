@@ -1786,6 +1786,24 @@ export function SettingsPage({ settings, regions, onSettingChange }: SettingsPag
               </label>
             </div>
 
+            <div className="settings-row">
+              <label className="settings-label">
+                <span className="settings-label-title">
+                  Native External Streamer
+                  <span className="settings-inline-badge settings-inline-badge--beta">Beta</span>
+                </span>
+                <span className="settings-hint">Launch the separate opennow-streamer native window for streaming and input instead of the Chromium WebRTC surface.</span>
+              </label>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={settings.enableExternalStreamer}
+                  onChange={(e) => handleChange("enableExternalStreamer", e.target.checked)}
+                />
+                <span className="settings-toggle-track" />
+              </label>
+            </div>
+
             {settings.controllerMode && (
               <div className="settings-controller-subsettings">
                 <div className="settings-row">

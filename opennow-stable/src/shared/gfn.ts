@@ -72,6 +72,8 @@ export interface Settings {
   gameLanguage: GameLanguage;
   /** Experimental request for Low Latency, Low Loss, Scalable throughput on new sessions */
   enableL4S: boolean;
+  /** Experimental external native streamer process */
+  enableExternalStreamer: boolean;
 }
 
 export interface LoginProvider {
@@ -338,6 +340,19 @@ export interface KeyframeRequest {
   attempt: number;
 }
 
+export interface ExternalStreamerLaunchRequest {
+  session: SessionInfo;
+  settings: StreamSettings;
+}
+
+export type NativeStreamerState = "idle" | "connecting" | "connected" | "disconnected" | "failed";
+
+export type MainToRendererStreamerEvent =
+  | { type: "availability"; available: boolean; reason?: string }
+  | { type: "state"; state: NativeStreamerState; detail?: string }
+  | { type: "log"; level: string; message: string }
+  | { type: "error"; message: string };
+
 export type MainToRendererSignalingEvent =
   | { type: "connected" }
   | { type: "disconnected"; reason: string }
@@ -374,7 +389,10 @@ export interface OpenNowApi {
   sendAnswer(input: SendAnswerRequest): Promise<void>;
   sendIceCandidate(input: IceCandidatePayload): Promise<void>;
   requestKeyframe(input: KeyframeRequest): Promise<void>;
+  startExternalStreamer(input: ExternalStreamerLaunchRequest): Promise<void>;
+  stopExternalStreamer(): Promise<void>;
   onSignalingEvent(listener: (event: MainToRendererSignalingEvent) => void): () => void;
+  onStreamerEvent(listener: (event: MainToRendererStreamerEvent) => void): () => void;
   /** Listen for F11 fullscreen toggle from main process */
   onToggleFullscreen(listener: () => void): () => void;
   setFullscreen(v: boolean): Promise<void>;

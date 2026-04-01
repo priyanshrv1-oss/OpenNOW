@@ -17,6 +17,8 @@ import type {
   SendAnswerRequest,
   IceCandidatePayload,
   KeyframeRequest,
+  ExternalStreamerLaunchRequest,
+  MainToRendererStreamerEvent,
   Settings,
   SubscriptionFetchRequest,
   StreamRegion,
@@ -62,6 +64,9 @@ const api: OpenNowApi = {
     ipcRenderer.invoke(IPC_CHANNELS.SEND_ICE_CANDIDATE, input),
   requestKeyframe: (input: KeyframeRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.REQUEST_KEYFRAME, input),
+  startExternalStreamer: (input: ExternalStreamerLaunchRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.STREAMER_START, input),
+  stopExternalStreamer: () => ipcRenderer.invoke(IPC_CHANNELS.STREAMER_STOP),
   onSignalingEvent: (listener: (event: MainToRendererSignalingEvent) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: MainToRendererSignalingEvent) => {
       listener(payload);
@@ -70,6 +75,16 @@ const api: OpenNowApi = {
     ipcRenderer.on(IPC_CHANNELS.SIGNALING_EVENT, wrapped);
     return () => {
       ipcRenderer.off(IPC_CHANNELS.SIGNALING_EVENT, wrapped);
+    };
+  },
+  onStreamerEvent: (listener: (event: MainToRendererStreamerEvent) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: MainToRendererStreamerEvent) => {
+      listener(payload);
+    };
+
+    ipcRenderer.on(IPC_CHANNELS.STREAMER_EVENT, wrapped);
+    return () => {
+      ipcRenderer.off(IPC_CHANNELS.STREAMER_EVENT, wrapped);
     };
   },
   onToggleFullscreen: (listener: () => void) => {
