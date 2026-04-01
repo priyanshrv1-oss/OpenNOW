@@ -77,13 +77,26 @@ impl StreamSession {
             Box::pin(async move {
                 if let Some(candidate) = candidate {
                     if let Ok(json) = candidate.to_json() {
+                        let normalized_mid = json.sdp_mid.and_then(|mid| if mid.is_empty() { None } else { Some(mid) })
+                            .or_else(|| json.sdp_mline_index.map(|_| "0".to_string()));
                         let _ = sender.send(StreamerMessage::LocalIce {
                             candidate: json.candidate,
-                            sdp_mid: json.sdp_mid.and_then(|mid| if mid.is_empty() { None } else { Some(mid) }),
+                            sdp_mid: normalized_mid,
                             sdp_m_line_index: json.sdp_mline_index,
                         }).await;
                     }
                 }
+            })
+        }));
+
+        let control_clone = control_tx.clone();
+        peer.on_ice_connection_state_change(Box::new(move |state| {
+            let sender = control_clone.clone();
+            Box::pin(async move {
+                let _ = sender.send(StreamerMessage::Log {
+                    level: "info".into(),
+                    message: format!("ice connection state {state}"),
+                }).await;
             })
         }));
 
@@ -240,7 +253,21 @@ impl StreamSession {
     }
 
     pub async fn add_remote_ice(&self, candidate: String, sdp_mid: Option<String>, sdp_m_line_index: Option<u16>) -> anyhow::Result<()> {
-        self.peer.add_ice_candidate(RTCIceCandidateInit { candidate, sdp_mid, sdp_mline_index: sdp_m_line_index, username_fragment: None }).await?;
+        let normalized_mid = sdp_mid.or_else(|| sdp_m_line_index.map(|_| "0".to_string()));
+        self.control_tx.send(StreamerMessage::Log {
+            level: "info".into(),
+            message: format!(
+                "adding remote ICE candidate (mid={}, mline={})",
+                normalized_mid.clone().unwrap_or_else(|| "null".into()),
+                sdp_m_line_index.map(|value| value.to_string()).unwrap_or_else(|| "null".into()),
+            ),
+        }).await.ok();
+        self.peer.add_ice_candidate(RTCIceCandidateInit {
+            candidate,
+            sdp_mid: normalized_mid,
+            sdp_mline_index: sdp_m_line_index,
+            username_fragment: None,
+        }).await?;
         Ok(())
     }
 
