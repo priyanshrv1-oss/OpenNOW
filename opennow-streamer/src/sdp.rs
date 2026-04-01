@@ -44,6 +44,29 @@ pub fn extract_ice_ufrag_from_offer(sdp: &str) -> String {
         .unwrap_or_default()
 }
 
+pub struct IceCredentials {
+    pub ufrag: String,
+    pub pwd: String,
+    pub fingerprint: String,
+}
+
+pub fn extract_ice_credentials(sdp: &str) -> IceCredentials {
+    let mut ufrag = String::new();
+    let mut pwd = String::new();
+    let mut fingerprint = String::new();
+    for line in sdp.lines() {
+        let trimmed = line.trim();
+        if let Some(value) = trimmed.strip_prefix("a=ice-ufrag:") {
+            ufrag = value.trim().to_string();
+        } else if let Some(value) = trimmed.strip_prefix("a=ice-pwd:") {
+            pwd = value.trim().to_string();
+        } else if let Some(value) = trimmed.strip_prefix("a=fingerprint:sha-256 ") {
+            fingerprint = value.trim().to_string();
+        }
+    }
+    IceCredentials { ufrag, pwd, fingerprint }
+}
+
 pub fn munge_answer_sdp(sdp: &str, max_bitrate_kbps: u32) -> String {
     let mut out = Vec::new();
     let mut current_media = String::new();
@@ -159,26 +182,146 @@ pub fn rewrite_h265_offer(sdp: &str) -> String {
 
 pub fn build_nvst_sdp(
     resolution: &str,
+    client_viewport_width: u32,
+    client_viewport_height: u32,
     fps: u16,
     max_bitrate_mbps: u16,
     codec: &str,
     color_quality: &str,
-    enable_l4s: bool,
     partial_reliable_threshold_ms: u16,
+    credentials: &IceCredentials,
 ) -> String {
     let mut parts = resolution.split('x');
     let width = parts.next().and_then(|v| v.parse::<u32>().ok()).unwrap_or(1920);
     let height = parts.next().and_then(|v| v.parse::<u32>().ok()).unwrap_or(1080);
-    let bit_depth = if color_quality.starts_with("10bit") { 10 } else { 8 };
-    let chroma = if color_quality.ends_with("444") { 444 } else { 420 };
-    format!(
-        "v=0\r\no=OpenNOW 0 0 IN IP4 127.0.0.1\r\ns=OpenNOW NVST\r\nt=0 0\r\na=x-nv-general.featureFlags:0\r\na=x-nv-video[0].clientViewportWd:{width}\r\na=x-nv-video[0].clientViewportHt:{height}\r\na=video.codec:{}\r\na=video.maxFPS:{}\r\na=video.bitDepth:{}\r\na=video.chroma:{}\r\na=bwe.maxBitrateKbps:{}\r\na=vqos.l4s:{}\r\na=ri.partialReliableThresholdMs:{}\r\nm=video 9 RTP/AVP 96\r\na=recvonly\r\nm=audio 9 RTP/AVP 111\r\na=recvonly\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=sendrecv\r\n",
-        codec.to_uppercase(),
-        fps,
-        bit_depth,
-        chroma,
-        u32::from(max_bitrate_mbps) * 1000,
-        if enable_l4s { 1 } else { 0 },
-        partial_reliable_threshold_ms,
-    )
+    let max_bitrate_kbps = u32::from(max_bitrate_mbps) * 1000;
+    let min_bitrate = max_bitrate_kbps.max(5000) * 35 / 100;
+    let initial_bitrate = (max_bitrate_kbps * 70 / 100).max(min_bitrate);
+    let is_high_fps = fps >= 90;
+    let is_120_fps = fps == 120;
+    let is_240_fps = fps >= 240;
+    let is_av1 = codec.eq_ignore_ascii_case("AV1");
+    let bit_depth = if color_quality.starts_with("10bit") && !codec.eq_ignore_ascii_case("H264") { 10 } else { 8 };
+    let mut lines = vec![
+        "v=0".to_string(),
+        "o=SdpTest test_id_13 14 IN IPv4 127.0.0.1".to_string(),
+        "s=-".to_string(),
+        "t=0 0".to_string(),
+        format!("a=general.icePassword:{}", credentials.pwd),
+        format!("a=general.iceUserNameFragment:{}", credentials.ufrag),
+        format!("a=general.dtlsFingerprint:{}", credentials.fingerprint),
+        "m=video 0 RTP/AVP".to_string(),
+        "a=msid:fbc-video-0".to_string(),
+        "a=vqos.fec.rateDropWindow:10".to_string(),
+        "a=vqos.fec.minRequiredFecPackets:2".to_string(),
+        "a=vqos.fec.repairMinPercent:5".to_string(),
+        "a=vqos.fec.repairPercent:5".to_string(),
+        "a=vqos.fec.repairMaxPercent:35".to_string(),
+        "a=vqos.drc.enable:0".to_string(),
+        "a=vqos.dfc.enable:0".to_string(),
+        "a=video.dx9EnableNv12:1".to_string(),
+        "a=video.dx9EnableHdr:1".to_string(),
+        "a=vqos.qpg.enable:1".to_string(),
+        "a=vqos.resControl.qp.qpg.featureSetting:7".to_string(),
+        "a=bwe.useOwdCongestionControl:1".to_string(),
+        "a=video.enableRtpNack:1".to_string(),
+        "a=vqos.bw.txRxLag.minFeedbackTxDeltaMs:200".to_string(),
+        "a=vqos.drc.bitrateIirFilterFactor:18".to_string(),
+        "a=video.packetSize:1140".to_string(),
+        "a=packetPacing.minNumPacketsPerGroup:15".to_string(),
+    ];
+    if is_high_fps {
+        lines.extend([
+            "a=bwe.iirFilterFactor:8".to_string(),
+            "a=video.encoderFeatureSetting:47".to_string(),
+            "a=video.encoderPreset:6".to_string(),
+            "a=vqos.resControl.cpmRtc.badNwSkipFramesCount:600".to_string(),
+            "a=vqos.resControl.cpmRtc.decodeTimeThresholdMs:9".to_string(),
+            format!("a=video.fbcDynamicFpsGrabTimeoutMs:{}", if is_120_fps { 6 } else { 18 }),
+            format!("a=vqos.resControl.cpmRtc.serverResolutionUpdateCoolDownCount:{}", if is_120_fps { 6000 } else { 12000 }),
+        ]);
+    }
+    if is_240_fps {
+        lines.extend([
+            "a=video.enableNextCaptureMode:1".to_string(),
+            "a=vqos.maxStreamFpsEstimate:240".to_string(),
+            "a=video.videoSplitEncodeStripsPerFrame:3".to_string(),
+            "a=video.updateSplitEncodeStateDynamically:1".to_string(),
+        ]);
+    }
+    lines.extend([
+        "a=vqos.adjustStreamingFpsDuringOutOfFocus:1".to_string(),
+        "a=vqos.resControl.cpmRtc.ignoreOutOfFocusWindowState:1".to_string(),
+        "a=vqos.resControl.perfHistory.rtcIgnoreOutOfFocusWindowState:1".to_string(),
+        "a=vqos.resControl.cpmRtc.featureMask:0".to_string(),
+        "a=vqos.resControl.cpmRtc.enable:0".to_string(),
+        "a=vqos.resControl.cpmRtc.minResolutionPercent:100".to_string(),
+        "a=vqos.resControl.cpmRtc.resolutionChangeHoldonMs:999999".to_string(),
+        format!("a=packetPacing.numGroups:{}", if is_120_fps { 3 } else { 5 }),
+        "a=packetPacing.maxDelayUs:1000".to_string(),
+        "a=packetPacing.minNumPacketsFrame:10".to_string(),
+        "a=video.rtpNackQueueLength:1024".to_string(),
+        "a=video.rtpNackQueueMaxPackets:512".to_string(),
+        "a=video.rtpNackMaxPacketCount:25".to_string(),
+        "a=vqos.drc.qpMaxResThresholdAdj:4".to_string(),
+        "a=vqos.grc.qpMaxResThresholdAdj:4".to_string(),
+        "a=vqos.drc.iirFilterFactor:100".to_string(),
+    ]);
+    if is_av1 {
+        lines.extend([
+            "a=vqos.drc.minQpHeadroom:20".to_string(),
+            "a=vqos.drc.lowerQpThreshold:100".to_string(),
+            "a=vqos.drc.upperQpThreshold:200".to_string(),
+            "a=vqos.drc.minAdaptiveQpThreshold:180".to_string(),
+            "a=vqos.drc.qpCodecThresholdAdj:0".to_string(),
+            "a=vqos.drc.qpMaxResThresholdAdj:20".to_string(),
+            "a=vqos.dfc.minQpHeadroom:20".to_string(),
+            "a=vqos.dfc.qpLowerLimit:100".to_string(),
+            "a=vqos.dfc.qpMaxUpperLimit:200".to_string(),
+            "a=vqos.dfc.qpMinUpperLimit:180".to_string(),
+            "a=vqos.dfc.qpMaxResThresholdAdj:20".to_string(),
+            "a=vqos.dfc.qpCodecThresholdAdj:0".to_string(),
+            "a=vqos.grc.minQpHeadroom:20".to_string(),
+            "a=vqos.grc.lowerQpThreshold:100".to_string(),
+            "a=vqos.grc.upperQpThreshold:200".to_string(),
+            "a=vqos.grc.minAdaptiveQpThreshold:180".to_string(),
+            "a=vqos.grc.qpMaxResThresholdAdj:20".to_string(),
+            "a=vqos.grc.qpCodecThresholdAdj:0".to_string(),
+            "a=video.minQp:25".to_string(),
+            "a=video.enableAv1RcPrecisionFactor:1".to_string(),
+        ]);
+    }
+    lines.extend([
+        format!("a=video.clientViewportWd:{client_viewport_width}"),
+        format!("a=video.clientViewportHt:{client_viewport_height}"),
+        format!("a=video.maxFPS:{fps}"),
+        format!("a=video.initialBitrateKbps:{initial_bitrate}"),
+        format!("a=video.initialPeakBitrateKbps:{max_bitrate_kbps}"),
+        format!("a=vqos.bw.maximumBitrateKbps:{max_bitrate_kbps}"),
+        format!("a=vqos.bw.minimumBitrateKbps:{min_bitrate}"),
+        format!("a=vqos.bw.peakBitrateKbps:{max_bitrate_kbps}"),
+        format!("a=vqos.bw.serverPeakBitrateKbps:{max_bitrate_kbps}"),
+        "a=vqos.bw.enableBandwidthEstimation:1".to_string(),
+        "a=vqos.bw.disableBitrateLimit:0".to_string(),
+        format!("a=vqos.grc.maximumBitrateKbps:{max_bitrate_kbps}"),
+        "a=vqos.grc.enable:0".to_string(),
+        "a=video.maxNumReferenceFrames:4".to_string(),
+        "a=video.mapRtpTimestampsToFrames:1".to_string(),
+        "a=video.encoderCscMode:3".to_string(),
+        "a=video.dynamicRangeMode:0".to_string(),
+        format!("a=video.bitDepth:{bit_depth}"),
+        format!("a=video.scalingFeature1:{}", if is_av1 { 1 } else { 0 }),
+        "a=video.prefilterParams.prefilterModel:0".to_string(),
+        "m=audio 0 RTP/AVP".to_string(),
+        "a=msid:audio".to_string(),
+        "m=mic 0 RTP/AVP".to_string(),
+        "a=msid:mic".to_string(),
+        "a=rtpmap:0 PCMU/8000".to_string(),
+        "m=application 0 RTP/AVP".to_string(),
+        "a=msid:input_1".to_string(),
+        format!("a=ri.partialReliableThresholdMs:{partial_reliable_threshold_ms}"),
+        String::new(),
+    ]);
+    let _ = (width, height);
+    lines.join("\n")
 }

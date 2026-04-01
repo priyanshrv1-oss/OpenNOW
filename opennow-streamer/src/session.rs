@@ -15,7 +15,7 @@ use crate::{
     input,
     media::{MediaEvent, MediaPipeline, VideoSettings},
     messages::{ControlMessage, SessionInfo, StreamSettings, StreamerMessage, StreamerState},
-    sdp::{build_nvst_sdp, extract_ice_ufrag_from_offer, fix_server_ip, munge_answer_sdp, parse_partial_reliable_threshold_ms, prefer_codec, rewrite_h265_offer, extract_public_ip},
+    sdp::{build_nvst_sdp, extract_ice_credentials, extract_ice_ufrag_from_offer, fix_server_ip, munge_answer_sdp, parse_partial_reliable_threshold_ms, prefer_codec, rewrite_h265_offer, extract_public_ip},
 };
 
 pub struct StreamSession {
@@ -79,7 +79,7 @@ impl StreamSession {
                     if let Ok(json) = candidate.to_json() {
                         let _ = sender.send(StreamerMessage::LocalIce {
                             candidate: json.candidate,
-                            sdp_mid: json.sdp_mid,
+                            sdp_mid: json.sdp_mid.and_then(|mid| if mid.is_empty() { None } else { Some(mid) }),
                             sdp_m_line_index: json.sdp_mline_index,
                         }).await;
                     }
@@ -177,15 +177,29 @@ impl StreamSession {
             message: "ice gathering completed".into(),
         }).await.ok();
         let local = self.peer.local_description().await.ok_or_else(|| anyhow!("missing local description"))?;
+        let width = self.settings.resolution.split('x').next().and_then(|v| v.parse::<u32>().ok()).unwrap_or(1920);
+        let height = self.settings.resolution.split('x').nth(1).and_then(|v| v.parse::<u32>().ok()).unwrap_or(1080);
+        let credentials = extract_ice_credentials(&local.sdp);
+        self.control_tx.send(StreamerMessage::Log {
+            level: "info".into(),
+            message: format!(
+                "local ICE credentials ufrag={} pwd={}... fingerprint={}...",
+                credentials.ufrag,
+                credentials.pwd.chars().take(8).collect::<String>(),
+                credentials.fingerprint.chars().take(20).collect::<String>(),
+            ),
+        }).await.ok();
         let munged_local_sdp = munge_answer_sdp(&local.sdp, u32::from(self.settings.max_bitrate_mbps) * 1000);
         let nvst = build_nvst_sdp(
             &self.settings.resolution,
+            width,
+            height,
             self.settings.fps,
             self.settings.max_bitrate_mbps,
             &self.settings.codec,
             &self.settings.color_quality,
-            self.settings.enable_l4s,
             partial_reliable,
+            &credentials,
         );
         self.control_tx.send(StreamerMessage::Log {
             level: "info".into(),
@@ -196,6 +210,10 @@ impl StreamSession {
         if let Some(mci) = &self.session.media_connection_info {
             if let Some(ip) = extract_public_ip(&mci.ip) {
                 let candidate = format!("candidate:1 1 udp 2130706431 {ip} {} typ host", mci.port);
+                self.control_tx.send(StreamerMessage::Log {
+                    level: "info".into(),
+                    message: format!("injecting manual ICE candidate {candidate}"),
+                }).await.ok();
                 for mid in ["0", "1", "2", "3"] {
                     let res = self.peer.add_ice_candidate(RTCIceCandidateInit {
                         candidate: candidate.clone(),
@@ -204,7 +222,16 @@ impl StreamSession {
                         username_fragment: Some(server_ufrag.clone()),
                     }).await;
                     if res.is_ok() {
+                        self.control_tx.send(StreamerMessage::Log {
+                            level: "info".into(),
+                            message: format!("manual ICE candidate accepted on sdpMid={mid}"),
+                        }).await.ok();
                         break;
+                    } else if let Err(error) = res {
+                        self.control_tx.send(StreamerMessage::Log {
+                            level: "warn".into(),
+                            message: format!("manual ICE candidate failed on sdpMid={mid}: {error}"),
+                        }).await.ok();
                     }
                 }
             }
