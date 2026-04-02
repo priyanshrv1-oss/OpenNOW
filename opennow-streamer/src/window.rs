@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    mem::size_of,
     sync::mpsc::Receiver,
     time::Duration,
 };
@@ -386,7 +387,16 @@ fn slot_for_instance(
 }
 
 fn queue_audio(queue: &AudioQueue<i16>, frame: AudioFrame) {
-    let _ = (frame.channels, frame.sample_rate);
+    let bytes_per_sample = size_of::<i16>() as u32;
+    let bytes_per_second = frame
+        .sample_rate
+        .saturating_mul(frame.channels.max(1) as u32)
+        .saturating_mul(bytes_per_sample);
+    let max_queued_bytes =
+        (bytes_per_second / 20).max(bytes_per_sample * frame.samples.len() as u32);
+    if queue.size() > max_queued_bytes {
+        queue.clear();
+    }
     let _ = queue.queue_audio(&frame.samples);
 }
 

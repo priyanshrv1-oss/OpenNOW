@@ -38,10 +38,16 @@ export class StreamerManager {
   private server: Server | null = null;
   private socket: Socket | null = null;
   private process: ChildProcess | null = null;
-  private pendingReady: { resolve: () => void; reject: (error: Error) => void; timer: NodeJS.Timeout } | null = null;
+  private pendingReady: {
+    resolve: () => void;
+    reject: (error: Error) => void;
+    timer: NodeJS.Timeout;
+  } | null = null;
   private mode: "idle" | "legacy" | "external" = "idle";
 
-  private settlePendingReady(outcome: { resolve: true } | { resolve: false; error: Error }): void {
+  private settlePendingReady(
+    outcome: { resolve: true } | { resolve: false; error: Error },
+  ): void {
     const pending = this.pendingReady;
     if (!pending) {
       return;
@@ -66,7 +72,10 @@ export class StreamerManager {
   getAvailability(): { available: boolean; reason?: string } {
     const binaryPath = this.resolveBinaryPath();
     if (!existsSync(binaryPath)) {
-      return { available: false, reason: `Missing opennow-streamer binary at ${binaryPath}` };
+      return {
+        available: false,
+        reason: `Missing opennow-streamer binary at ${binaryPath}`,
+      };
     }
     return { available: true };
   }
@@ -78,7 +87,9 @@ export class StreamerManager {
   async start(request: ExternalStreamerLaunchRequest): Promise<void> {
     const availability = this.getAvailability();
     if (!availability.available) {
-      throw new Error(availability.reason ?? "Native streamer binary unavailable");
+      throw new Error(
+        availability.reason ?? "Native streamer binary unavailable",
+      );
     }
 
     await this.stop();
@@ -87,7 +98,11 @@ export class StreamerManager {
     const ready = this.waitForReady();
     this.mode = "external";
     this.emit({ type: "availability", available: true });
-    this.emit({ type: "state", state: "connecting", detail: "launching native streamer" });
+    this.emit({
+      type: "state",
+      state: "connecting",
+      detail: "launching native streamer",
+    });
 
     const runtimeEnv = { ...process.env };
     if (process.platform === "linux") {
@@ -104,10 +119,14 @@ export class StreamerManager {
     }
     runtimeEnv.RUST_BACKTRACE ??= "1";
 
-    const child = spawn(binaryPath, ["--control-url", `tcp://127.0.0.1:${port}`], {
-      stdio: ["ignore", "pipe", "pipe"],
-      env: runtimeEnv,
-    });
+    const child = spawn(
+      binaryPath,
+      ["--control-url", `tcp://127.0.0.1:${port}`],
+      {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: runtimeEnv,
+      },
+    );
     this.process = child;
 
     child.stdout?.on("data", (chunk) => {
@@ -121,7 +140,10 @@ export class StreamerManager {
     });
 
     child.once("error", (error) => {
-      this.settlePendingReady({ resolve: false, error: new Error(`native streamer failed to launch: ${String(error)}`) });
+      this.settlePendingReady({
+        resolve: false,
+        error: new Error(`native streamer failed to launch: ${String(error)}`),
+      });
     });
 
     child.once("exit", (code, signal) => {
@@ -138,11 +160,18 @@ export class StreamerManager {
     });
 
     await ready;
-    await this.sendControl({ type: "configure", session: request.session, settings: request.settings });
+    await this.sendControl({
+      type: "configure",
+      session: request.session,
+      settings: request.settings,
+    });
   }
 
   async stop(): Promise<void> {
-    this.settlePendingReady({ resolve: false, error: new Error("native streamer startup cancelled") });
+    this.settlePendingReady({
+      resolve: false,
+      error: new Error("native streamer startup cancelled"),
+    });
     if (this.socket && !this.socket.destroyed) {
       await this.sendControl({ type: "stop" }).catch(() => {});
     }
@@ -158,7 +187,9 @@ export class StreamerManager {
     this.mode = "idle";
   }
 
-  async forwardSignalingEvent(event: MainToRendererSignalingEvent): Promise<boolean> {
+  async forwardSignalingEvent(
+    event: MainToRendererSignalingEvent,
+  ): Promise<boolean> {
     if (this.mode !== "external") {
       return false;
     }
@@ -208,23 +239,46 @@ export class StreamerManager {
     const repoCandidates = repoRoots.flatMap((root) =>
       app.isPackaged
         ? [
-            resolve(root, `opennow-streamer/target/release/opennow-streamer${suffix}`),
-            resolve(root, `opennow-streamer/target/debug/opennow-streamer${suffix}`),
+            resolve(
+              root,
+              `opennow-streamer/target/release/opennow-streamer${suffix}`,
+            ),
+            resolve(
+              root,
+              `opennow-streamer/target/debug/opennow-streamer${suffix}`,
+            ),
           ]
         : [
-            resolve(root, `opennow-streamer/target/debug/opennow-streamer${suffix}`),
-            resolve(root, `opennow-streamer/target/release/opennow-streamer${suffix}`),
+            resolve(
+              root,
+              `opennow-streamer/target/debug/opennow-streamer${suffix}`,
+            ),
+            resolve(
+              root,
+              `opennow-streamer/target/release/opennow-streamer${suffix}`,
+            ),
           ],
     );
     const candidates = [
       ...(envOverride ? [envOverride] : []),
-      resolve(mainDir, `../../../../opennow-streamer/target/release/opennow-streamer${suffix}`),
-      resolve(mainDir, `../../../../opennow-streamer/target/debug/opennow-streamer${suffix}`),
+      resolve(
+        mainDir,
+        `../../../../opennow-streamer/target/release/opennow-streamer${suffix}`,
+      ),
+      resolve(
+        mainDir,
+        `../../../../opennow-streamer/target/debug/opennow-streamer${suffix}`,
+      ),
       ...repoCandidates,
       join(process.resourcesPath, "bin", `opennow-streamer${suffix}`),
-      resolve(app.getAppPath(), `../opennow-streamer/target/release/opennow-streamer${suffix}`),
+      resolve(
+        app.getAppPath(),
+        `../opennow-streamer/target/release/opennow-streamer${suffix}`,
+      ),
     ];
-    return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
+    return (
+      candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]
+    );
   }
 
   private async createControlServer(): Promise<number> {
@@ -253,10 +307,20 @@ export class StreamerManager {
         if (this.socket === socket) {
           this.socket = null;
         }
-        this.settlePendingReady({ resolve: false, error: new Error("native streamer control socket closed before handshake") });
+        this.settlePendingReady({
+          resolve: false,
+          error: new Error(
+            "native streamer control socket closed before handshake",
+          ),
+        });
       });
       socket.on("error", (error) => {
-        this.settlePendingReady({ resolve: false, error: new Error(`native streamer control socket error: ${String(error)}`) });
+        this.settlePendingReady({
+          resolve: false,
+          error: new Error(
+            `native streamer control socket error: ${String(error)}`,
+          ),
+        });
       });
     });
 
@@ -276,7 +340,10 @@ export class StreamerManager {
   private waitForReady(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
-        this.settlePendingReady({ resolve: false, error: new Error("Timed out waiting for native streamer handshake") });
+        this.settlePendingReady({
+          resolve: false,
+          error: new Error("Timed out waiting for native streamer handshake"),
+        });
       }, 10_000);
       this.pendingReady = { resolve, reject, timer };
     });
@@ -292,8 +359,30 @@ export class StreamerManager {
       throw new Error("Native streamer control channel is not connected");
     }
     await new Promise<void>((resolve, reject) => {
-      this.socket?.write(`${JSON.stringify(message)}\n`, (error) => (error ? reject(error) : resolve()));
+      this.socket?.write(`${JSON.stringify(message)}\n`, (error) =>
+        error ? reject(error) : resolve(),
+      );
     });
+  }
+
+  private shouldForwardLog(
+    level: string | undefined,
+    message: string | undefined,
+  ): boolean {
+    if (!message) {
+      return false;
+    }
+    if (process.env.OPENNOW_STREAMER_VERBOSE === "1") {
+      return true;
+    }
+    if (level === "debug") {
+      return false;
+    }
+    return ![
+      "remote data channel control_channel:",
+      "remote data channel remote_trace_channel:",
+      "input channel message ",
+    ].some((prefix) => message.startsWith(prefix));
   }
 
   private handleProcessMessage(line: string): void {
@@ -301,7 +390,10 @@ export class StreamerManager {
     try {
       parsed = JSON.parse(line) as StreamerProcessMessage;
     } catch (error) {
-      this.emit({ type: "error", message: `Invalid native streamer payload: ${String(error)}` });
+      this.emit({
+        type: "error",
+        message: `Invalid native streamer payload: ${String(error)}`,
+      });
       return;
     }
 
@@ -309,17 +401,31 @@ export class StreamerManager {
       if (this.pendingReady) {
         this.settlePendingReady({ resolve: true });
       }
-      this.emit({ type: "log", level: "info", message: `native streamer connected pid=${parsed.pid ?? "unknown"}` });
+      this.emit({
+        type: "log",
+        level: "info",
+        message: `native streamer connected pid=${parsed.pid ?? "unknown"}`,
+      });
       return;
     }
 
     if (parsed.type === "log") {
-      this.emit({ type: "log", level: parsed.level ?? "info", message: parsed.message ?? "" });
+      if (this.shouldForwardLog(parsed.level, parsed.message)) {
+        this.emit({
+          type: "log",
+          level: parsed.level ?? "info",
+          message: parsed.message ?? "",
+        });
+      }
       return;
     }
 
     if (parsed.type === "state") {
-      this.emit({ type: "state", state: parsed.state ?? "connecting", detail: parsed.detail });
+      this.emit({
+        type: "state",
+        state: parsed.state ?? "connecting",
+        detail: parsed.detail,
+      });
       return;
     }
 
@@ -329,9 +435,14 @@ export class StreamerManager {
         level: "info",
         message: `forwarding native answer (${parsed.sdp.length} chars, nvst=${parsed.nvstSdp?.length ?? 0} chars)`,
       });
-      void this.signalingHandlers.sendAnswer({ sdp: parsed.sdp, nvstSdp: parsed.nvstSdp }).catch((error) => {
-        this.emit({ type: "error", message: `Failed to forward native answer: ${String(error)}` });
-      });
+      void this.signalingHandlers
+        .sendAnswer({ sdp: parsed.sdp, nvstSdp: parsed.nvstSdp })
+        .catch((error) => {
+          this.emit({
+            type: "error",
+            message: `Failed to forward native answer: ${String(error)}`,
+          });
+        });
       return;
     }
 
@@ -341,13 +452,18 @@ export class StreamerManager {
         level: "info",
         message: `forwarding native ICE candidate (mid=${parsed.sdpMid ?? "null"}, mline=${parsed.sdpMLineIndex ?? "null"})`,
       });
-      void this.signalingHandlers.sendIceCandidate({
-        candidate: parsed.candidate,
-        sdpMid: parsed.sdpMid,
-        sdpMLineIndex: parsed.sdpMLineIndex,
-      }).catch((error) => {
-        this.emit({ type: "error", message: `Failed to forward native ICE: ${String(error)}` });
-      });
+      void this.signalingHandlers
+        .sendIceCandidate({
+          candidate: parsed.candidate,
+          sdpMid: parsed.sdpMid,
+          sdpMLineIndex: parsed.sdpMLineIndex,
+        })
+        .catch((error) => {
+          this.emit({
+            type: "error",
+            message: `Failed to forward native ICE: ${String(error)}`,
+          });
+        });
     }
   }
 
