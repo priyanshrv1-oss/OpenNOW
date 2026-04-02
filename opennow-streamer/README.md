@@ -53,3 +53,6 @@ Packaging/runtime model:
 - packaged OpenNOW builds copy `opennow-streamer` and a colocated `ffmpeg` sidecar into `resources/bin/` via `opennow-stable/scripts/bundle-native-runtime.mjs`
 - `opennow-stable` build now runs `cargo build --release` for the native streamer and bundles both binaries into Electron extra resources
 - at runtime the streamer resolves `ffmpeg` relative to its own executable first, then `resources/bin`, then `OPENNOW_FFMPEG_BIN` for development overrides
+
+Build note:
+- `opennow-streamer/.cargo/config.toml` sets `CMAKE_POLICY_VERSION_MINIMUM=3.5` so the bundled SDL build still configures on newer CMake releases used on current macOS developer machines
