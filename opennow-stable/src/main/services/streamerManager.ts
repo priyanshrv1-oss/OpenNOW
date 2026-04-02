@@ -1,5 +1,6 @@
 import { app, BrowserWindow } from "electron";
 import { createServer, type Server, type Socket } from "node:net";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { type ChildProcess, spawn } from "node:child_process";
@@ -188,11 +189,14 @@ export class StreamerManager {
     const mainDir = dirname(__filename);
     const suffix = process.platform === "win32" ? ".exe" : "";
     const envOverride = process.env.OPENNOW_STREAMER_BIN;
+    const home = homedir();
     const repoCandidates = [
       process.cwd(),
       app.getAppPath(),
       resolve(app.getAppPath(), ".."),
       "/home/zortos/Projects/OpenNOW",
+      "/Users/zortos/Projects/OpenNOW",
+      resolve(home, "Projects/OpenNOW"),
     ].flatMap((root) => [
       resolve(root, `opennow-streamer/target/release/opennow-streamer${suffix}`),
       resolve(root, `opennow-streamer/target/debug/opennow-streamer${suffix}`),
