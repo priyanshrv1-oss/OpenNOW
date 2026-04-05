@@ -15,6 +15,7 @@ import type {
   StreamRegion,
   VideoCodec,
 } from "@shared/gfn";
+import { DEFAULT_CONTROLLER_THEME, controllerThemeContrastText, normalizeControllerTheme } from "@shared/gfn";
 
 import {
   GfnWebRtcClient,
@@ -417,6 +418,9 @@ export function App(): JSX.Element {
     controllerMode: false,
     controllerUiSounds: false,
     controllerBackgroundAnimations: false,
+    controllerThemeRed: DEFAULT_CONTROLLER_THEME.red,
+    controllerThemeGreen: DEFAULT_CONTROLLER_THEME.green,
+    controllerThemeBlue: DEFAULT_CONTROLLER_THEME.blue,
     autoLoadControllerLibrary: false,
     autoFullScreen: false,
     favoriteGameIds: [],
@@ -1300,6 +1304,17 @@ export function App(): JSX.Element {
 
     return () => unsubscribe();
   }, [resetLaunchRuntime, settings]);
+
+  useEffect(() => {
+    const theme = normalizeControllerTheme({
+      red: settings.controllerThemeRed,
+      green: settings.controllerThemeGreen,
+      blue: settings.controllerThemeBlue,
+    });
+
+    document.body.style.setProperty("--controller-accent-rgb", `${theme.red} ${theme.green} ${theme.blue}`);
+    document.body.style.setProperty("--controller-accent-on", controllerThemeContrastText(theme));
+  }, [settings.controllerThemeRed, settings.controllerThemeGreen, settings.controllerThemeBlue]);
 
   // Save settings when changed
   const updateSetting = useCallback(async <K extends keyof Settings>(key: K, value: Settings[K]) => {
@@ -2277,6 +2292,9 @@ export function App(): JSX.Element {
                 enableL4S: settings.enableL4S,
                 controllerUiSounds: settings.controllerUiSounds,
                 controllerBackgroundAnimations: settings.controllerBackgroundAnimations,
+                controllerThemeRed: settings.controllerThemeRed,
+                controllerThemeGreen: settings.controllerThemeGreen,
+                controllerThemeBlue: settings.controllerThemeBlue,
                 autoLoadControllerLibrary: settings.autoLoadControllerLibrary,
                 autoFullScreen: settings.autoFullScreen,
                 aspectRatio: settings.aspectRatio,
@@ -2409,6 +2427,9 @@ export function App(): JSX.Element {
                 enableL4S: settings.enableL4S,
                 controllerUiSounds: settings.controllerUiSounds,
                 controllerBackgroundAnimations: settings.controllerBackgroundAnimations,
+                controllerThemeRed: settings.controllerThemeRed,
+                controllerThemeGreen: settings.controllerThemeGreen,
+                controllerThemeBlue: settings.controllerThemeBlue,
                 autoLoadControllerLibrary: settings.autoLoadControllerLibrary,
                 autoFullScreen: settings.autoFullScreen,
                 aspectRatio: settings.aspectRatio,

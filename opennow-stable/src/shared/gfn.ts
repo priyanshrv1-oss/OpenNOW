@@ -35,6 +35,39 @@ export function colorQualityIs10Bit(cq: ColorQuality): boolean {
 export type MicrophoneMode = "disabled" | "push-to-talk" | "voice-activity";
 export type AspectRatio = "16:9" | "16:10" | "21:9" | "32:9";
 
+export interface ControllerThemeRgb {
+  red: number;
+  green: number;
+  blue: number;
+}
+
+export const DEFAULT_CONTROLLER_THEME: ControllerThemeRgb = {
+  red: 88,
+  green: 217,
+  blue: 138,
+};
+
+export function clampControllerThemeChannel(value: unknown, fallback: number): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+  return Math.max(0, Math.min(255, Math.round(numeric)));
+}
+
+export function normalizeControllerTheme(theme?: Partial<ControllerThemeRgb> | null): ControllerThemeRgb {
+  return {
+    red: clampControllerThemeChannel(theme?.red, DEFAULT_CONTROLLER_THEME.red),
+    green: clampControllerThemeChannel(theme?.green, DEFAULT_CONTROLLER_THEME.green),
+    blue: clampControllerThemeChannel(theme?.blue, DEFAULT_CONTROLLER_THEME.blue),
+  };
+}
+
+export function controllerThemeContrastText(theme: ControllerThemeRgb): string {
+  const brightness = (theme.red * 299 + theme.green * 587 + theme.blue * 114) / 1000;
+  return brightness >= 150 ? "#07120b" : "#f7fbff";
+}
+
 export interface Settings {
   resolution: string;
   aspectRatio: AspectRatio;
@@ -61,6 +94,9 @@ export interface Settings {
   autoLoadControllerLibrary: boolean;
   /** When true, controller-mode overlays will show animated background orbs */
   controllerBackgroundAnimations: boolean;
+  controllerThemeRed: number;
+  controllerThemeGreen: number;
+  controllerThemeBlue: number;
   /** When true, the app will automatically enter fullscreen when controller mode triggers it */
   autoFullScreen: boolean;
   favoriteGameIds: string[];

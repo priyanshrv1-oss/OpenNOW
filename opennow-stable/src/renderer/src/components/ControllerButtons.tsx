@@ -12,12 +12,13 @@ export function ButtonA({ className, size = 18 }: ButtonProps): JSX.Element {
       height={size} 
       viewBox="0 0 24 24" 
       className={className}
+      style={{ color: "var(--accent)" }}
       aria-hidden="true"
       fill="none" 
       xmlns="http://www.w3.org/2000/svg"
     >
-      <circle cx="12" cy="12" r="10" stroke="#58d98a" strokeWidth="2.5" fill="rgba(88, 217, 138, 0.1)" />
-      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" fontSize="12" fontWeight="900" fill="#58d98a" fontFamily="Inter, system-ui">A</text>
+      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2.5" fill="currentColor" fillOpacity={0.1} />
+      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" fontSize="12" fontWeight="900" fill="currentColor" fontFamily="Inter, system-ui">A</text>
     </svg>
   );
 }
@@ -76,9 +77,9 @@ export function ButtonY({ className, size = 18 }: ButtonProps): JSX.Element {
 // PlayStation-style icons
 export function ButtonPSCross({ className, size = 18 }: ButtonProps): JSX.Element {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden="true" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="12" cy="12" r="10" stroke="#3b82f6" strokeWidth="2" fill="rgba(59,130,246,0.06)" />
-      <path d="M8 8 L16 16 M16 8 L8 16" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} style={{ color: "var(--accent)" }} aria-hidden="true" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="currentColor" fillOpacity={0.06} />
+      <path d="M8 8 L16 16 M16 8 L8 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

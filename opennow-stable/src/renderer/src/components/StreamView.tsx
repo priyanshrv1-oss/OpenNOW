@@ -230,11 +230,14 @@ function useMicMeter(
           const filled = Math.round(level * SEG);
 
           ctx2d.clearRect(0, 0, W, H);
+          const accentColor = (getComputedStyle(document.body).getPropertyValue("--accent") || "#58d98a").trim();
+          const warningColor = (getComputedStyle(document.body).getPropertyValue("--warning") || "#fbbf24").trim();
+          const errorColor = (getComputedStyle(document.body).getPropertyValue("--error") || "#f87171").trim();
+
           for (let i = 0; i < SEG; i++) {
             const x = i * (bw + GAP);
             if (i < filled) {
-              ctx2d.fillStyle =
-                i < SEG * 0.7 ? "#58d98a" : i < SEG * 0.9 ? "#fbbf24" : "#f87171";
+              ctx2d.fillStyle = i < SEG * 0.7 ? accentColor : i < SEG * 0.9 ? warningColor : errorColor;
             } else {
               ctx2d.fillStyle = "rgba(255,255,255,0.07)";
             }

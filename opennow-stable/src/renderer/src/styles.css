@@ -22,13 +22,13 @@
   --ink-muted: #5c5c66;
 
   /* Accent — green */
-  --accent: #58d98a;
-  --accent-hover: #6ae89a;
-  --accent-press: #44c477;
-  --accent-glow: rgba(88, 217, 138, 0.25);
-  --accent-surface: rgba(88, 217, 138, 0.08);
-  --accent-surface-strong: rgba(88, 217, 138, 0.14);
-  --accent-on: #062315;
+  --accent: rgb(var(--controller-accent-rgb, 88 217 138));
+  --accent-hover: color-mix(in srgb, rgb(var(--controller-accent-rgb, 88 217 138)) 82%, white);
+  --accent-press: color-mix(in srgb, rgb(var(--controller-accent-rgb, 88 217 138)) 82%, black);
+  --accent-glow: rgb(var(--controller-accent-rgb, 88 217 138) / 0.25);
+  --accent-surface: rgb(var(--controller-accent-rgb, 88 217 138) / 0.08);
+  --accent-surface-strong: rgb(var(--controller-accent-rgb, 88 217 138) / 0.14);
+  --accent-on: var(--controller-accent-on, #062315);
 
   /* Semantic */
   --error: #f87171;
@@ -781,7 +781,7 @@ body,
 }
 
 .navbar-meter-fill--good {
-  background: linear-gradient(90deg, #44c477, #58d98a);
+  background: linear-gradient(90deg, var(--accent-press), var(--accent));
 }
 
 .navbar-meter-fill--warn {
@@ -837,6 +837,15 @@ body,
    ====================================================== */
 body.controller-mode {
   --navbar-h: 54px;
+  --controller-accent-rgb: 88 217 138;
+  --controller-accent-on: #062315;
+  --accent: rgb(var(--controller-accent-rgb));
+  --accent-hover: color-mix(in srgb, rgb(var(--controller-accent-rgb)) 82%, white);
+  --accent-press: color-mix(in srgb, rgb(var(--controller-accent-rgb)) 82%, black);
+  --accent-glow: rgb(var(--controller-accent-rgb) / 0.25);
+  --accent-surface: rgb(var(--controller-accent-rgb) / 0.08);
+  --accent-surface-strong: rgb(var(--controller-accent-rgb) / 0.14);
+  --accent-on: var(--controller-accent-on);
 }
 
 .controller-mode .controller-focus,
@@ -845,8 +854,8 @@ body.controller-mode {
   outline: none !important;
   border-color: color-mix(in srgb, var(--accent) 82%, var(--panel-border)) !important;
   box-shadow:
-    0 0 0 2px rgba(88, 217, 138, 0.38),
-    0 0 0 8px rgba(88, 217, 138, 0.10),
+    0 0 0 2px rgb(var(--controller-accent-rgb) / 0.38),
+    0 0 0 8px rgb(var(--controller-accent-rgb) / 0.10),
     0 18px 36px rgba(0, 0, 0, 0.48) !important;
   transform-origin: center center;
   transition:
@@ -886,15 +895,15 @@ body.controller-mode {
 
 .controller-mode .settings-slider.controller-range-editing {
   box-shadow:
-    0 0 0 2px rgba(88, 217, 138, 0.25),
-    0 0 0 5px rgba(88, 217, 138, 0.1);
+    0 0 0 2px rgb(var(--controller-accent-rgb) / 0.25),
+    0 0 0 5px rgb(var(--controller-accent-rgb) / 0.1);
 }
 
 .controller-mode .settings-slider.controller-range-editing::-webkit-slider-thumb {
-  background: #8af1ae;
+  background: var(--accent-hover);
   box-shadow:
-    0 0 0 2px rgba(88, 217, 138, 0.35),
-    0 0 14px rgba(88, 217, 138, 0.45);
+    0 0 0 2px rgb(var(--controller-accent-rgb) / 0.35),
+    0 0 14px rgb(var(--controller-accent-rgb) / 0.45);
 }
 
 .controller-mode .settings-section {
@@ -938,7 +947,7 @@ body.controller-mode.controller-hide-cursor * {
   border-radius: var(--r-full);
   border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--panel-border));
   background:
-    linear-gradient(160deg, rgba(88, 217, 138, 0.13), rgba(88, 217, 138, 0.04)),
+    linear-gradient(160deg, rgb(var(--controller-accent-rgb) / 0.13), rgb(var(--controller-accent-rgb) / 0.04)),
     rgba(10, 10, 12, 0.9);
   color: #d9e8e0;
   font-size: 0.69rem;
@@ -946,7 +955,7 @@ body.controller-mode.controller-hide-cursor * {
   letter-spacing: 0.01em;
   box-shadow:
     var(--shadow-sm),
-    0 0 0 1px rgba(88, 217, 138, 0.13) inset;
+    0 0 0 1px rgb(var(--controller-accent-rgb) / 0.13) inset;
   backdrop-filter: blur(4px);
   pointer-events: none;
 }
@@ -5091,7 +5100,7 @@ button.game-card-store-chip.active:hover {
   content: "";
   position: absolute;
   inset: 0;
-  background: radial-gradient(90% 90% at 50% 50%, rgba(179, 255, 215, 0.08), rgba(0, 0, 0, 0.48) 72%);
+  background: radial-gradient(90% 90% at 50% 50%, rgb(var(--controller-accent-rgb) / 0.08), rgba(0, 0, 0, 0.48) 72%);
   opacity: 0;
   pointer-events: none;
   z-index: 0;
@@ -5143,7 +5152,7 @@ button.game-card-store-chip.active:hover {
   inset: 0;
   z-index: -1;
   background:
-    radial-gradient(118% 72% at 50% -10%, rgba(188, 255, 223, 0.22) 0%, rgba(124, 241, 177, 0.08) 28%, rgba(7, 17, 30, 0) 56%),
+    radial-gradient(118% 72% at 50% -10%, rgb(var(--controller-accent-rgb) / 0.22) 0%, rgb(var(--controller-accent-rgb) / 0.08) 28%, rgba(7, 17, 30, 0) 56%),
     linear-gradient(180deg, #081711 0%, #06110d 32%, #030906 68%, #010302 100%);
 }
 
@@ -5152,9 +5161,9 @@ button.game-card-store-chip.active:hover {
   position: absolute;
   inset: -16%;
   background:
-    linear-gradient(118deg, transparent 21%, rgba(215, 255, 232, 0.08) 28%, rgba(215, 255, 232, 0.22) 31%, rgba(112, 231, 167, 0.18) 34%, rgba(215, 255, 232, 0.06) 38%, transparent 44%),
-    linear-gradient(128deg, transparent 30%, rgba(162, 255, 206, 0.06) 37%, rgba(242, 255, 248, 0.2) 40%, rgba(112, 231, 167, 0.16) 44%, rgba(242, 255, 248, 0.05) 48%, transparent 54%),
-    radial-gradient(circle at 52% 48%, rgba(199, 255, 225, 0.06), transparent 34%);
+    linear-gradient(118deg, transparent 21%, rgb(var(--controller-accent-rgb) / 0.08) 28%, rgb(var(--controller-accent-rgb) / 0.22) 31%, rgb(var(--controller-accent-rgb) / 0.18) 34%, rgb(var(--controller-accent-rgb) / 0.06) 38%, transparent 44%),
+    linear-gradient(128deg, transparent 30%, rgb(var(--controller-accent-rgb) / 0.06) 37%, rgba(242, 255, 248, 0.2) 40%, rgb(var(--controller-accent-rgb) / 0.16) 44%, rgba(242, 255, 248, 0.05) 48%, transparent 54%),
+    radial-gradient(circle at 52% 48%, rgb(var(--controller-accent-rgb) / 0.06), transparent 34%);
   background-size: 140% 140%, 155% 155%, 100% 100%;
   background-repeat: no-repeat;
   mix-blend-mode: screen;
@@ -5176,7 +5185,7 @@ button.game-card-store-chip.active:hover {
 .xmb-bg-gradient::before {
   background:
     radial-gradient(76% 12% at 30% 54%, rgba(241, 255, 248, 0.34) 0%, rgba(241, 255, 248, 0.2) 18%, rgba(241, 255, 248, 0) 58%),
-    radial-gradient(84% 14% at 67% 60%, rgba(133, 247, 187, 0.22) 0%, rgba(133, 247, 187, 0.12) 16%, rgba(133, 247, 187, 0) 60%);
+    radial-gradient(84% 14% at 67% 60%, rgb(var(--controller-accent-rgb) / 0.22) 0%, rgb(var(--controller-accent-rgb) / 0.12) 16%, rgb(var(--controller-accent-rgb) / 0) 60%);
   mix-blend-mode: screen;
   opacity: 0.82;
   transform: rotate(-8deg) scale(1.06);
@@ -5185,7 +5194,7 @@ button.game-card-store-chip.active:hover {
 
 .xmb-bg-gradient::after {
   background:
-    radial-gradient(78% 12% at 58% 40%, rgba(169, 255, 212, 0.2) 0%, rgba(169, 255, 212, 0.11) 18%, rgba(169, 255, 212, 0) 58%),
+    radial-gradient(78% 12% at 58% 40%, rgb(var(--controller-accent-rgb) / 0.2) 0%, rgb(var(--controller-accent-rgb) / 0.11) 18%, rgb(var(--controller-accent-rgb) / 0) 58%),
     radial-gradient(70% 10% at 41% 70%, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0.08) 16%, rgba(255, 255, 255, 0) 52%);
   opacity: 0.52;
   transform: rotate(6deg) scale(1.12);
@@ -5331,9 +5340,9 @@ button.game-card-store-chip.active:hover {
   opacity: 1;
   /* counter the default scale so the active row appears larger than its neighbours */
   transform: translateX(50px) scale(1.12);
-  background: linear-gradient(90deg, rgba(103, 236, 159, 0.34), rgba(245, 255, 249, 0.12));
-  border-color: rgba(231, 255, 240, 0.36);
-  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.52), 0 0 28px rgba(116, 255, 177, 0.22);
+  background: linear-gradient(90deg, rgb(var(--controller-accent-rgb) / 0.34), rgba(245, 255, 249, 0.12));
+  border-color: rgb(var(--controller-accent-rgb) / 0.36);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.52), 0 0 28px rgb(var(--controller-accent-rgb) / 0.22);
   z-index: 10;
 }
 
@@ -5428,12 +5437,12 @@ button.game-card-store-chip.active:hover {
 }
 
 .xmb-game-meta-chip--playtime {
-  background: rgba(110, 255, 179, 0.09);
-  border-color: rgba(110, 255, 179, 0.24);
+  background: rgb(var(--controller-accent-rgb) / 0.09);
+  border-color: rgb(var(--controller-accent-rgb) / 0.24);
 }
 .xmb-game-item.active .xmb-game-meta-chip--playtime {
   color: #b9ffd0;
-  border-color: rgba(110, 255, 179, 0.42);
+  border-color: rgb(var(--controller-accent-rgb) / 0.42);
 }
 
 .xmb-game-meta-chip--last-played {
@@ -5446,12 +5455,12 @@ button.game-card-store-chip.active:hover {
 }
 
 .xmb-game-meta-chip--sessions {
-  background: rgba(88, 217, 138, 0.08);
-  border-color: rgba(88, 217, 138, 0.2);
+  background: rgb(var(--controller-accent-rgb) / 0.08);
+  border-color: rgb(var(--controller-accent-rgb) / 0.2);
 }
 .xmb-game-item.active .xmb-game-meta-chip--sessions {
   color: #6ee7b7;
-  border-color: rgba(88, 217, 138, 0.4);
+  border-color: rgb(var(--controller-accent-rgb) / 0.4);
 }
 
 .xmb-game-meta-chip--genre {
@@ -5642,7 +5651,7 @@ button.game-card-store-chip.active:hover {
   position: absolute;
   right: 24px;
   font-size: 0.7rem;
-  color: rgba(88, 217, 138, 0.6);
+  color: rgb(var(--controller-accent-rgb) / 0.6);
   opacity: 0;
   transition: all 300ms cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -5776,21 +5785,21 @@ button.game-card-store-chip.active:hover {
   aspect-ratio: 9 / 16;
   object-fit: cover;
   border-radius: 16px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7), 0 0 60px rgba(88, 217, 138, 0.15);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7), 0 0 60px rgb(var(--controller-accent-rgb) / 0.15);
   animation: csl-content-slide-up 0.8s cubic-bezier(0.22, 1, 0.36, 1) 0.4s both;
-  border: 1px solid rgba(88, 217, 138, 0.2);
+  border: 1px solid rgb(var(--controller-accent-rgb) / 0.2);
 }
 
 .csl-poster-placeholder {
   width: 100%;
   aspect-ratio: 9 / 16;
-  background: linear-gradient(135deg, rgba(88, 217, 138, 0.1) 0%, rgba(88, 217, 138, 0.05) 100%);
+  background: linear-gradient(135deg, rgb(var(--controller-accent-rgb) / 0.1) 0%, rgb(var(--controller-accent-rgb) / 0.05) 100%);
   border-radius: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(88, 217, 138, 0.3);
-  border: 2px solid rgba(88, 217, 138, 0.1);
+  color: rgb(var(--controller-accent-rgb) / 0.3);
+  border: 2px solid rgb(var(--controller-accent-rgb) / 0.1);
 }
 
 /* Info Section (Right) */
@@ -5862,7 +5871,7 @@ button.game-card-store-chip.active:hover {
   gap: 24px;
   margin-top: 16px;
   padding-top: 24px;
-  border-top: 1px solid rgba(88, 217, 138, 0.1);
+  border-top: 1px solid rgb(var(--controller-accent-rgb) / 0.1);
 }
 
 .csl-status-message {
@@ -5893,15 +5902,15 @@ button.game-card-store-chip.active:hover {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: rgba(88, 217, 138, 0.2);
-  border: 2px solid rgba(88, 217, 138, 0.3);
+  background: rgb(var(--controller-accent-rgb) / 0.2);
+  border: 2px solid rgb(var(--controller-accent-rgb) / 0.3);
   transition: all 300ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .csl-progress-step.active .csl-progress-dot {
   background: var(--accent);
   border-color: var(--accent);
-  box-shadow: 0 0 12px rgba(88, 217, 138, 0.5);
+  box-shadow: 0 0 12px rgb(var(--controller-accent-rgb) / 0.5);
 }
 
 .csl-progress-step.completed .csl-progress-dot {
@@ -5910,8 +5919,8 @@ button.game-card-store-chip.active:hover {
 }
 
 .csl-progress-step.inactive .csl-progress-dot {
-  background: rgba(88, 217, 138, 0.1);
-  border-color: rgba(88, 217, 138, 0.15);
+  background: rgb(var(--controller-accent-rgb) / 0.1);
+  border-color: rgb(var(--controller-accent-rgb) / 0.15);
 }
 
 .csl-progress-label {
@@ -5939,12 +5948,12 @@ button.game-card-store-chip.active:hover {
 
 .csl-progress-connector {
   height: 2px;
-  background: linear-gradient(90deg, rgba(88, 217, 138, 0.3) 0%, rgba(88, 217, 138, 0.2) 100%);
+  background: linear-gradient(90deg, rgb(var(--controller-accent-rgb) / 0.3) 0%, rgb(var(--controller-accent-rgb) / 0.2) 100%);
   transition: all 300ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .csl-progress-connector.inactive {
-  background: rgba(88, 217, 138, 0.1);
+  background: rgb(var(--controller-accent-rgb) / 0.1);
 }
 
 /* Spinner */
@@ -5958,7 +5967,7 @@ button.game-card-store-chip.active:hover {
 .csl-spinner {
   animation: csl-spin 2s linear infinite;
   color: var(--accent);
-  filter: drop-shadow(0 0 8px rgba(88, 217, 138, 0.4));
+  filter: drop-shadow(0 0 8px rgb(var(--controller-accent-rgb) / 0.4));
 }
 
 /* Responsive Design */

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
 import type { GameInfo, MediaListingEntry, Settings } from "@shared/gfn";
+import { clampControllerThemeChannel, normalizeControllerTheme } from "@shared/gfn";
 import { Star, Clock, Calendar, Repeat2 } from "lucide-react";
 import { ButtonA, ButtonB, ButtonX, ButtonY, ButtonPSCross, ButtonPSCircle, ButtonPSSquare, ButtonPSTriangle } from "./ControllerButtons";
 import { getStoreDisplayName } from "./GameCard";
@@ -34,6 +35,9 @@ interface ControllerLibraryPageProps {
     enableL4S?: boolean;
     controllerUiSounds?: boolean;
     controllerBackgroundAnimations?: boolean;
+    controllerThemeRed?: number;
+    controllerThemeGreen?: number;
+    controllerThemeBlue?: number;
     autoLoadControllerLibrary?: boolean;
     autoFullScreen?: boolean;
     aspectRatio?: string;
@@ -51,8 +55,9 @@ interface ControllerLibraryPageProps {
 type Direction = "up" | "down" | "left" | "right";
 type TopCategory = "current" | "all" | "settings" | "media" | "favorites" | `genre:${string}`;
 type SoundKind = "move" | "confirm";
-type SettingsSubcategory = "root" | "Network" | "Audio" | "Video" | "System";
+type SettingsSubcategory = "root" | "Network" | "Audio" | "Video" | "Theme" | "System";
 type MediaSubcategory = "root" | "Videos" | "Screenshots";
+type RangeSettingId = "bandwidth" | "themeRed" | "themeGreen" | "themeBlue";
 
 const CATEGORY_STEP_PX = 160;
 const CATEGORY_ACTIVE_HALF_WIDTH_PX = 60;
@@ -174,7 +179,16 @@ export function ControllerLibraryPage({
   const [mediaScreenshots, setMediaScreenshots] = useState<MediaListingEntry[]>([]);
   const [mediaThumbById, setMediaThumbById] = useState<Record<string, string>>({});
   const [controllerType, setControllerType] = useState<"ps" | "xbox" | "nintendo" | "generic">("generic");
-  const [editingBandwidth, setEditingBandwidth] = useState(false);
+  const [editingSettingId, setEditingSettingId] = useState<RangeSettingId | null>(null);
+  const controllerTheme = useMemo(
+    () => normalizeControllerTheme({
+      red: settings.controllerThemeRed,
+      green: settings.controllerThemeGreen,
+      blue: settings.controllerThemeBlue,
+    }),
+    [settings.controllerThemeRed, settings.controllerThemeGreen, settings.controllerThemeBlue]
+  );
+  const controllerThemeLabel = `RGB(${controllerTheme.red}, ${controllerTheme.green}, ${controllerTheme.blue})`;
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -321,6 +335,7 @@ export function ControllerLibraryPage({
         { id: "network", label: "Network", value: "" },
         { id: "audio", label: "Audio", value: "" },
         { id: "video", label: "Video", value: "" },
+        { id: "theme", label: "Theme", value: controllerThemeLabel },
         { id: "system", label: "System", value: "" },
         { id: "exitApp", label: "Exit", value: "" },
       ],
@@ -334,6 +349,11 @@ export function ControllerLibraryPage({
         { id: "fps", label: "Frame Rate", value: `${settings.fps || 60} FPS` },
         { id: "codec", label: "Video Codec", value: settings.codec || "H264" },
       ],
+      Theme: [
+        { id: "themeRed", label: "Red", value: `${controllerTheme.red}` },
+        { id: "themeGreen", label: "Green", value: `${controllerTheme.green}` },
+        { id: "themeBlue", label: "Blue", value: `${controllerTheme.blue}` },
+      ],
       Audio: [
         { id: "microphone", label: "Microphone", value: micLabel },
         { id: "sounds", label: "UI Sounds", value: settings.controllerUiSounds ? "On" : "Off" },
@@ -345,7 +365,7 @@ export function ControllerLibraryPage({
         { id: "exitControllerMode", label: "Exit Controller Mode", value: "" },
       ],
     } as Record<string, Array<{ id: string; label: string; value: string }>>;
-  }, [settings, microphoneDevices]);
+  }, [controllerTheme, controllerThemeLabel, settings, microphoneDevices]);
  
   const currentGameItems = useMemo(() => [
     { id: "resume", label: "Resume Game", value: "" },
@@ -496,19 +516,43 @@ export function ControllerLibraryPage({
 
   useEffect(() => {
     const applyDirection = (direction: Direction): void => {
-      // When editing the bandwidth slider, use left/right to adjust value
-      if (topCategory === "settings" && settingsSubcategory !== "root" && editingBandwidth) {
-        const step = 5; // Mbps per left/right press
-        const current = settings.maxBitrateMbps ?? 75;
-        if (direction === "left") {
-          const next = Math.max(5, current - step);
-          onSettingChange && onSettingChange("maxBitrateMbps" as any, next as any);
+      if (topCategory === "settings" && settingsSubcategory !== "root" && editingSettingId) {
+        if (direction !== "left" && direction !== "right") {
+          return;
+        }
+
+        if (editingSettingId === "bandwidth") {
+          const step = 5;
+          const current = settings.maxBitrateMbps ?? 75;
+          const next = direction === "left" ? Math.max(5, current - step) : Math.min(150, current + step);
+          onSettingChange?.("maxBitrateMbps", next);
           playUiSound("move");
           return;
         }
-        if (direction === "right") {
-          const next = Math.min(150, current + step);
-          onSettingChange && onSettingChange("maxBitrateMbps" as any, next as any);
+
+        if (editingSettingId === "themeRed") {
+          const next = direction === "left"
+            ? clampControllerThemeChannel(controllerTheme.red - 1, 0)
+            : clampControllerThemeChannel(controllerTheme.red + 1, 255);
+          onSettingChange?.("controllerThemeRed", next);
+          playUiSound("move");
+          return;
+        }
+
+        if (editingSettingId === "themeGreen") {
+          const next = direction === "left"
+            ? clampControllerThemeChannel(controllerTheme.green - 1, 0)
+            : clampControllerThemeChannel(controllerTheme.green + 1, 255);
+          onSettingChange?.("controllerThemeGreen", next);
+          playUiSound("move");
+          return;
+        }
+
+        if (editingSettingId === "themeBlue") {
+          const next = direction === "left"
+            ? clampControllerThemeChannel(controllerTheme.blue - 1, 0)
+            : clampControllerThemeChannel(controllerTheme.blue + 1, 255);
+          onSettingChange?.("controllerThemeBlue", next);
           playUiSound("move");
           return;
         }
@@ -520,6 +564,7 @@ export function ControllerLibraryPage({
         setCategoryIndex((prev) => (prev - 1 + TOP_CATEGORIES.length) % TOP_CATEGORIES.length);
         setSelectedSettingIndex(0);
         setSettingsSubcategory("root");
+        setEditingSettingId(null);
         setSelectedMediaIndex(0);
         setMediaSubcategory("root");
         return;
@@ -530,6 +575,7 @@ export function ControllerLibraryPage({
         setCategoryIndex((prev) => (prev + 1) % TOP_CATEGORIES.length);
         setSelectedSettingIndex(0);
         setSettingsSubcategory("root");
+        setEditingSettingId(null);
         setSelectedMediaIndex(0);
         setMediaSubcategory("root");
         return;
@@ -598,9 +644,8 @@ export function ControllerLibraryPage({
     };
 
     const activateHandler = () => {
-      // If currently editing bandwidth, A confirms and exits edit mode
-      if (topCategory === "settings" && settingsSubcategory !== "root" && editingBandwidth) {
-        setEditingBandwidth(false);
+      if (topCategory === "settings" && settingsSubcategory !== "root" && editingSettingId) {
+        setEditingSettingId(null);
         playUiSound("confirm");
         return;
       }
@@ -620,14 +665,15 @@ export function ControllerLibraryPage({
       }
       if (topCategory === "settings") {
         const setting = displayItems[selectedSettingIndex];
-        // Enter subcategory if at root and selecting network/audio/system
-        if (settingsSubcategory === "root" && setting && (setting.id === "network" || setting.id === "audio" || setting.id === "video" || setting.id === "system")) {
+        if (settingsSubcategory === "root" && setting && (setting.id === "network" || setting.id === "audio" || setting.id === "video" || setting.id === "theme" || setting.id === "system")) {
           setLastRootSettingIndex(selectedSettingIndex);
           if (setting.id === "network") setSettingsSubcategory("Network");
           if (setting.id === "audio") setSettingsSubcategory("Audio");
           if (setting.id === "video") setSettingsSubcategory("Video");
+          if (setting.id === "theme") setSettingsSubcategory("Theme");
           if (setting.id === "system") setSettingsSubcategory("System");
           setSelectedSettingIndex(0);
+          setEditingSettingId(null);
           playUiSound("confirm");
           return;
         }
@@ -695,7 +741,13 @@ export function ControllerLibraryPage({
           if (!setting || !onSettingChange) return;
           if (setting.id === "exitApp" || setting.id === "exitControllerMode") return;
           // Skip X cycling for subcategory items at root
-          if (settingsSubcategory === "root" && (setting.id === "network" || setting.id === "audio" || setting.id === "video" || setting.id === "system")) return;
+          if (settingsSubcategory === "root" && (setting.id === "network" || setting.id === "audio" || setting.id === "video" || setting.id === "theme" || setting.id === "system")) return;
+
+          if (setting.id === "bandwidth" || setting.id === "themeRed" || setting.id === "themeGreen" || setting.id === "themeBlue") {
+            setEditingSettingId(setting.id);
+            playUiSound("move");
+            return;
+          }
 
           // Microphone device cycling
           if (setting.id === "microphone") {
@@ -745,11 +797,6 @@ export function ControllerLibraryPage({
             onSettingChange("enableL4S" as any, !((settings as any).enableL4S || false));
             playUiSound("move");
           }
-          else if (setting.id === "bandwidth") {
-            // Enter bandwidth edit mode so d-pad left/right adjust value
-            setEditingBandwidth(true);
-            playUiSound("move");
-          }
           return;
         }
       if (selectedGame && selectedGame.variants.length > 1) {
@@ -770,14 +817,15 @@ export function ControllerLibraryPage({
       // Circle/B button goes back from subcategory to root.
       // Prevent default to signal the App-level back handler that we've handled it.
       if (topCategory === "settings" && settingsSubcategory !== "root") {
-        if (editingBandwidth) {
-          setEditingBandwidth(false);
+        if (editingSettingId) {
+          setEditingSettingId(null);
           playUiSound("move");
           e.preventDefault();
           return;
         }
         setSettingsSubcategory("root");
         setSelectedSettingIndex(lastRootSettingIndex);
+        setEditingSettingId(null);
         playUiSound("move");
         e.preventDefault();
         return;
@@ -841,6 +889,7 @@ export function ControllerLibraryPage({
           setCategoryIndex((prev) => (prev - 1 + TOP_CATEGORIES.length) % TOP_CATEGORIES.length);
           setSelectedSettingIndex(0);
           setSettingsSubcategory("root");
+          setEditingSettingId(null);
           setSelectedMediaIndex(0);
           setMediaSubcategory("root");
         } else {
@@ -863,7 +912,7 @@ export function ControllerLibraryPage({
       window.removeEventListener("opennow:controller-cancel", cancelHandler);
       window.removeEventListener("keydown", kbdHandler);
     };
-  }, [isLoading, TOP_CATEGORIES.length, categorizedGames, selectedIndex, selectedGame, selectedVariantId, onPlayGame, onSelectGameVariant, onOpenSettings, playUiSound, throttledOnSelectGame, toggleFavoriteForSelected, topCategory, selectedSettingIndex, selectedMediaIndex, displayItems, mediaAssetItems.length, mediaSubcategory, settings, settingsBySubcategory, settingsSubcategory, lastRootSettingIndex, lastRootMediaIndex, onSettingChange, resolutionOptions, fpsOptions, codecOptions, aspectRatioOptions, currentStreamingGame, onResumeGame, onCloseGame, onExitControllerMode, onExitApp, editingBandwidth]);
+  }, [isLoading, TOP_CATEGORIES.length, categorizedGames, selectedIndex, selectedGame, selectedVariantId, onPlayGame, onSelectGameVariant, onOpenSettings, playUiSound, throttledOnSelectGame, toggleFavoriteForSelected, topCategory, selectedSettingIndex, selectedMediaIndex, displayItems, mediaAssetItems.length, mediaSubcategory, settings, settingsBySubcategory, settingsSubcategory, lastRootSettingIndex, lastRootMediaIndex, onSettingChange, resolutionOptions, fpsOptions, codecOptions, aspectRatioOptions, currentStreamingGame, onResumeGame, onCloseGame, onExitControllerMode, onExitApp, editingSettingId, controllerTheme]);
 
   const wrapperClassName = `xmb-wrapper ${settings.controllerBackgroundAnimations ? "xmb-animate" : "xmb-static"} ${isEntering ? "xmb-entering" : "xmb-ready"}`;
 
@@ -1009,8 +1058,15 @@ export function ControllerLibraryPage({
       >
         {displayItems.map((item, idx) => {
           const isActive = idx === (topCategory === "media" ? selectedMediaIndex : selectedSettingIndex);
-          const isSubcategoryItem = settingsSubcategory === "root" && (item.id === "network" || item.id === "audio" || item.id === "video" || item.id === "system");
+          const isSubcategoryItem = settingsSubcategory === "root" && (item.id === "network" || item.id === "audio" || item.id === "video" || item.id === "theme" || item.id === "system");
           const isMediaSubcategoryItem = topCategory === "media" && mediaSubcategory === "root" && (item.id === "videos" || item.id === "screenshots");
+          const isBandwidthItem = item.id === "bandwidth";
+          const isThemeChannelItem = item.id === "themeRed" || item.id === "themeGreen" || item.id === "themeBlue";
+          const themeChannelValue = item.id === "themeRed"
+            ? controllerTheme.red
+            : item.id === "themeGreen"
+              ? controllerTheme.green
+              : controllerTheme.blue;
           return (
             <div 
               key={item.id} 
@@ -1023,7 +1079,7 @@ export function ControllerLibraryPage({
                 <div className="xmb-game-title">{item.label}</div>
                 {item.value && (
                   <div className="xmb-game-meta">
-                    {item.id === 'bandwidth' && settingsSubcategory !== 'root' ? (
+                    {isBandwidthItem && settingsSubcategory !== 'root' ? (
                       <div style={{display:'flex',alignItems:'center',gap:12}}>
                         <input
                           type="range"
@@ -1031,11 +1087,40 @@ export function ControllerLibraryPage({
                           max={150}
                           step={1}
                           value={(settings.maxBitrateMbps ?? 75)}
-                          onChange={(e) => onSettingChange && onSettingChange("maxBitrateMbps" as any, Number(e.target.value) as any)}
+                          onChange={(e) => onSettingChange?.("maxBitrateMbps", Number(e.target.value))}
                           aria-label="Bandwidth Limit (Mbps)"
-                          style={editingBandwidth ? {outline: '2px solid rgba(255,255,255,0.2)'} : undefined}
+                          style={editingSettingId === item.id ? {outline: '2px solid rgba(255,255,255,0.2)'} : undefined}
                         />
-                        <span className="xmb-game-meta-chip">{`${settings.maxBitrateMbps ?? 75} Mbps`}{editingBandwidth ? ' • Editing' : ''}</span>
+                        <span className="xmb-game-meta-chip">{`${settings.maxBitrateMbps ?? 75} Mbps`}{editingSettingId === item.id ? ' • Editing' : ''}</span>
+                      </div>
+                    ) : isThemeChannelItem && settingsSubcategory === "Theme" ? (
+                      <div style={{display:'flex',alignItems:'center',gap:12}}>
+                        <input
+                          type="range"
+                          min={0}
+                          max={255}
+                          step={1}
+                          value={themeChannelValue}
+                          onChange={(e) => {
+                            const nextValue = Number(e.target.value);
+                            if (item.id === "themeRed") onSettingChange?.("controllerThemeRed", nextValue);
+                            if (item.id === "themeGreen") onSettingChange?.("controllerThemeGreen", nextValue);
+                            if (item.id === "themeBlue") onSettingChange?.("controllerThemeBlue", nextValue);
+                          }}
+                          aria-label={`${item.label} Channel`}
+                          style={editingSettingId === item.id ? {outline: '2px solid rgba(255,255,255,0.2)'} : undefined}
+                        />
+                        <span className="xmb-game-meta-chip">{themeChannelValue}{editingSettingId === item.id ? ' • Editing' : ''}</span>
+                        <span
+                          aria-hidden
+                          style={{
+                            width: 14,
+                            height: 14,
+                            borderRadius: 999,
+                            background: `rgb(${controllerTheme.red} ${controllerTheme.green} ${controllerTheme.blue})`,
+                            boxShadow: '0 0 0 1px rgba(255,255,255,0.18) inset',
+                          }}
+                        />
                       </div>
                     ) : (
                       <span className="xmb-game-meta-chip">{item.value}</span>

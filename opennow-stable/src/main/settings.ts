@@ -2,6 +2,7 @@ import { app } from "electron";
 import { join } from "node:path";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import type { VideoCodec, ColorQuality, VideoAccelerationPreference, MicrophoneMode, GameLanguage, AspectRatio } from "@shared/gfn";
+import { DEFAULT_CONTROLLER_THEME, clampControllerThemeChannel, normalizeControllerTheme } from "@shared/gfn";
 
 export interface Settings {
   /** Video resolution (e.g., "1920x1080") */
@@ -54,6 +55,10 @@ export interface Settings {
   controllerUiSounds: boolean;
   /** Enable animated background visuals for controller-mode loading screens */
   controllerBackgroundAnimations: boolean;
+  /** RGB accent color used by controller-mode UI */
+  controllerThemeRed: number;
+  controllerThemeGreen: number;
+  controllerThemeBlue: number;
   /** Auto-load controller library at startup when controller mode is enabled */
   autoLoadControllerLibrary: boolean;
   /** Automatically enter fullscreen when controller-mode triggers it */
@@ -99,6 +104,9 @@ const DEFAULT_SETTINGS: Settings = {
   controllerMode: false,
   controllerUiSounds: false,
   controllerBackgroundAnimations: false,
+  controllerThemeRed: DEFAULT_CONTROLLER_THEME.red,
+  controllerThemeGreen: DEFAULT_CONTROLLER_THEME.green,
+  controllerThemeBlue: DEFAULT_CONTROLLER_THEME.blue,
   autoLoadControllerLibrary: false,
   autoFullScreen: false,
   favoriteGameIds: [],
@@ -141,6 +149,22 @@ export class SettingsManager {
 
       let migrated = this.migrateLegacyShortcutDefaults(merged);
       migrated = this.enforceCompatibility(merged) || migrated;
+
+      const normalizedTheme = normalizeControllerTheme({
+        red: merged.controllerThemeRed,
+        green: merged.controllerThemeGreen,
+        blue: merged.controllerThemeBlue,
+      });
+      if (
+        normalizedTheme.red !== merged.controllerThemeRed ||
+        normalizedTheme.green !== merged.controllerThemeGreen ||
+        normalizedTheme.blue !== merged.controllerThemeBlue
+      ) {
+        merged.controllerThemeRed = normalizedTheme.red;
+        merged.controllerThemeGreen = normalizedTheme.green;
+        merged.controllerThemeBlue = normalizedTheme.blue;
+        migrated = true;
+      }
 
       // Migrate legacy boolean accelerator setting to percentage slider.
       if (typeof (parsed as { mouseAcceleration?: unknown }).mouseAcceleration === "boolean") {
@@ -228,7 +252,11 @@ export class SettingsManager {
    * Update a specific setting value
    */
   set<K extends keyof Settings>(key: K, value: Settings[K]): void {
-    this.settings[key] = value;
+    if (key === "controllerThemeRed" || key === "controllerThemeGreen" || key === "controllerThemeBlue") {
+      this.settings[key] = clampControllerThemeChannel(value, this.settings[key] as number) as Settings[K];
+    } else {
+      this.settings[key] = value;
+    }
     this.save();
   }
 
@@ -240,6 +268,14 @@ export class SettingsManager {
       ...this.settings,
       ...updates,
     };
+    const normalizedTheme = normalizeControllerTheme({
+      red: this.settings.controllerThemeRed,
+      green: this.settings.controllerThemeGreen,
+      blue: this.settings.controllerThemeBlue,
+    });
+    this.settings.controllerThemeRed = normalizedTheme.red;
+    this.settings.controllerThemeGreen = normalizedTheme.green;
+    this.settings.controllerThemeBlue = normalizedTheme.blue;
     this.save();
   }
 
