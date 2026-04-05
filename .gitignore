@@ -42,3 +42,5 @@ package-lock.json
 # AI Agent guidelines (local only)
 AGENTS.md
 release-notes.md
+opennow-stable/result
+result

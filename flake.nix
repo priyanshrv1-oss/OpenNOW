@@ -23,6 +23,7 @@
           pkgs.python3
           pkgs.gcc
           pkgs.makeWrapper
+          pkgs.copyDesktopItems
         ];
 
         runtimeDeps = [
@@ -54,6 +55,21 @@
           nativeBuildInputs = nativeDeps;
           buildInputs = runtimeDeps;
 
+          desktopItems = [
+            (pkgs.makeDesktopItem {
+              name = "opennow";
+              exec = "opennow %U";
+              icon = "opennow";
+              desktopName = "OpenNOW";
+              genericName = "Cloud Gaming Client";
+              categories = [
+                "Game"
+                "Network"
+              ];
+              terminal = false;
+            })
+          ];
+
           npmBuild = "npm run build";
 
           installPhase = ''
@@ -79,6 +95,11 @@
               --inherit-argv0 \
               --add-flags "--enable-features=WaylandWindowDecorations --platform-hint=auto"
 
+            mkdir -p $out/share/icons/hicolor/512x512/apps
+            if [ -f "src/renderer/src/assets/opennow-logo.png" ]; then
+              cp src/renderer/src/assets/opennow-logo.png $out/share/icons/hicolor/512x512/apps/opennow.png
+            fi
+
             runHook postInstall
           '';
 
@@ -93,7 +114,6 @@
 
         devShells.default = pkgs.mkShell {
           inputsFrom = [ self.packages.${system}.default ];
-
           shellHook = ''
             export ELECTRON_SKIP_BINARY_DOWNLOAD=1
           '';
