@@ -479,17 +479,6 @@ export function ControllerLibraryPage({
   const showCurrentDetail = topCategory === "current" && Boolean(currentStreamingGame);
   const detailVisible = showCurrentDetail || showGameHub;
 
-  const selectedGameVariant = useMemo(() => {
-    if (!selectedGame) return null;
-    return selectedGame.variants.find((variant) => variant.id === selectedVariantId) ?? selectedGame.variants[0] ?? null;
-  }, [selectedGame, selectedVariantId]);
-
-  const selectedGameStoreName = useMemo(() => getStoreDisplayName(selectedGameVariant?.store || ""), [selectedGameVariant]);
-  const selectedGameRecord = useMemo(() => {
-    if (!selectedGame) return undefined;
-    return playtimeData[selectedGame.id];
-  }, [playtimeData, selectedGame]);
-  const selectedGameGenres = useMemo(() => selectedGame?.genres?.slice(0, 3) ?? [], [selectedGame]);
   const selectedCategoryLabel = useMemo(() => getCategoryLabel(topCategory, currentStreamingGame?.title).label, [topCategory, currentStreamingGame?.title]);
   const selectedGameDescription = useMemo(() => {
     if (!selectedGame) return "";
@@ -497,7 +486,8 @@ export function ControllerLibraryPage({
     return description || `${selectedGame.title} is ready to launch from your XMB library.`;
   }, [selectedGame]);
   const selectedGameSessionState = useMemo(() => {
-    if (!selectedGame || !currentStreamingGame) return null;
+    if (!selectedGame) return null;
+    if (!currentStreamingGame) return "Ready To Launch";
     if (currentStreamingGame.id === selectedGame.id) return "Active Session";
     return "Ready To Switch";
   }, [currentStreamingGame, selectedGame]);
@@ -1291,17 +1281,7 @@ export function ControllerLibraryPage({
                 </div>
                 <p className="xmb-game-hub-description">{selectedGameDescription}</p>
                 <div className="xmb-game-meta xmb-game-hub-meta">
-                  {selectedGameStoreName && <span className="xmb-game-meta-chip xmb-game-meta-chip--store">{selectedGameStoreName}</span>}
                   {selectedGameSessionState && <span className="xmb-game-meta-chip xmb-game-meta-chip--session">{selectedGameSessionState}</span>}
-                  <span className="xmb-game-meta-chip xmb-game-meta-chip--playtime">
-                    <Clock size={10} className="xmb-meta-icon" />
-                    {formatPlaytime(selectedGameRecord?.totalSeconds ?? 0)}
-                  </span>
-                  <span className="xmb-game-meta-chip xmb-game-meta-chip--last-played">
-                    <Calendar size={10} className="xmb-meta-icon" />
-                    {formatLastPlayed(selectedGameRecord?.lastPlayedAt ?? null)}
-                  </span>
-                  {selectedGameGenres[0] && <span className="xmb-game-meta-chip xmb-game-meta-chip--genre">{sanitizeGenreName(selectedGameGenres[0])}</span>}
                 </div>
 
                 <div className="xmb-game-hub-captures">
@@ -1323,8 +1303,7 @@ export function ControllerLibraryPage({
                           <div key={item.id} className="xmb-game-hub-capture">
                             {thumb && <img src={thumb} alt={item.fileName} className="xmb-game-hub-capture-image" />}
                             <div className="xmb-game-hub-capture-meta">
-                              <span className="xmb-game-hub-capture-type">{captureLabel}</span>
-                              <div className="xmb-game-hub-capture-name">{item.fileName}</div>
+                              <div className="xmb-game-hub-capture-name">{captureLabel}</div>
                               <div className="xmb-game-hub-capture-date">{new Date(item.createdAtMs).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</div>
                             </div>
                           </div>

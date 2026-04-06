@@ -5492,7 +5492,8 @@ button.game-card-store-chip.active:hover {
   position: absolute;
   bottom: 200px;
   right: 5%;
-  width: 30%;
+  width: auto;
+  max-width: min(26vw, 340px);
   opacity: 0;
   transform: translateX(40px);
   transition: all 600ms cubic-bezier(0.22, 1, 0.36, 1);
@@ -5511,7 +5512,8 @@ button.game-card-store-chip.active:hover {
 
 .xmb-current-detail,
 .xmb-game-hub {
-  width: 100%;
+  width: auto;
+  max-width: 100%;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -5536,7 +5538,8 @@ button.game-card-store-chip.active:hover {
 
 .xmb-current-info,
 .xmb-game-hub-panel {
-  width: 100%;
+  width: auto;
+  max-width: 100%;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -5599,7 +5602,7 @@ button.game-card-store-chip.active:hover {
 .xmb-game-hub-capture-grid {
   width: 100%;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 8px;
 }
 
@@ -5629,7 +5632,7 @@ button.game-card-store-chip.active:hover {
 
 .xmb-game-hub-capture {
   position: relative;
-  min-height: 88px;
+  min-height: 76px;
 }
 
 .xmb-game-hub-capture::after {
@@ -5650,7 +5653,7 @@ button.game-card-store-chip.active:hover {
 .xmb-game-hub-capture-meta {
   position: relative;
   z-index: 1;
-  min-height: 88px;
+  min-height: 76px;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
@@ -5659,22 +5662,9 @@ button.game-card-store-chip.active:hover {
   padding: 10px;
 }
 
-.xmb-game-hub-capture-type {
-  display: inline-flex;
-  align-items: center;
-  padding: 3px 8px;
-  border-radius: 999px;
-  font-size: 0.62rem;
-  font-weight: 800;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.96);
-  background: rgba(255, 255, 255, 0.14);
-}
-
 .xmb-game-hub-capture-name {
   max-width: 100%;
-  font-size: 0.7rem;
+  font-size: 0.76rem;
   font-weight: 800;
   color: rgba(255, 255, 255, 0.96);
   white-space: nowrap;
@@ -5700,17 +5690,13 @@ button.game-card-store-chip.active:hover {
 
 @media (max-width: 1500px) {
   .xmb-detail-layer {
-    width: 34%;
+    max-width: min(30vw, 340px);
   }
 }
 
 @media (max-width: 1220px) {
   .xmb-detail-layer {
-    width: 38%;
-  }
-
-  .xmb-game-hub-capture-grid {
-    grid-template-columns: 1fr;
+    max-width: min(36vw, 340px);
   }
 }
 
