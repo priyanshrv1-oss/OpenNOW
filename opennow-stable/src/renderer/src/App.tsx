@@ -1363,6 +1363,12 @@ export function App(): JSX.Element {
     }
   }, [settingsLoaded]);
 
+  const handleExitApp = useCallback(() => {
+    void window.openNow.quitApp().catch((error) => {
+      console.warn("Failed to quit application:", error);
+    });
+  }, []);
+
   const handleMicrophoneModeChange = useCallback((value: import("@shared/gfn").MicrophoneMode) => {
     // Keep UI responsive while still surfacing persistence failures.
     void updateSetting("microphoneMode", value).catch((error) => {
@@ -2198,7 +2204,7 @@ export function App(): JSX.Element {
             }}
           />
         )}
-        {isSwitchingGame && settings.controllerMode && (
+        {isSwitchingGame && settings.controllerMode && streamStatus !== "connecting" && (
           <ControllerStreamLoading
             gameTitle={pendingSwitchGameTitle ?? streamingGame?.title ?? "Game"}
             gamePoster={pendingSwitchGameCover ?? streamingGame?.imageUrl}
@@ -2284,7 +2290,7 @@ export function App(): JSX.Element {
             />
           </div>
         )}
-        {streamStatus !== "idle" && streamStatus !== "streaming" && settings.controllerMode && (
+        {streamStatus !== "idle" && streamStatus !== "streaming" && streamStatus !== "connecting" && settings.controllerMode && !isSwitchingGame && (
           <ControllerStreamLoading
             gameTitle={streamingGame?.title ?? "Game"}
             gamePoster={streamingGame?.imageUrl}
@@ -2296,7 +2302,7 @@ export function App(): JSX.Element {
             enableBackgroundAnimations={settings.controllerBackgroundAnimations}
           />
         )}
-        {streamStatus !== "idle" && streamStatus !== "streaming" && !settings.controllerMode && (
+        {streamStatus !== "idle" && streamStatus !== "streaming" && !settings.controllerMode && !isSwitchingGame && (
           <StreamLoading
             gameTitle={streamingGame?.title ?? "Game"}
             gameCover={streamingGame?.imageUrl}
@@ -2414,6 +2420,7 @@ export function App(): JSX.Element {
               aspectRatioOptions={aspectRatioOptions as unknown as string[]}
               onSettingChange={updateSetting}
               onExitControllerMode={handleExitControllerMode}
+              onExitApp={handleExitApp}
             />
           ) : (
             <LibraryPage
