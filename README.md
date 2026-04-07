@@ -21,9 +21,6 @@
   <a href="https://opennow.zortos.me">
     <img src="https://img.shields.io/badge/Docs-opennow.zortos.me-blue?style=for-the-badge" alt="Documentation">
   </a>
-  <a href="https://buymeacoffee.com/zortos">
-    <img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-Support-ffdd00?style=for-the-badge&logo=buymeacoffee&logoColor=black" alt="Buy Me a Coffee">
-  </a>
   <a href="https://github.com/OpenCloudGaming/OpenNOW/actions/workflows/auto-build.yml">
     <img src="https://img.shields.io/github/actions/workflow/status/OpenCloudGaming/OpenNOW/auto-build.yml?style=for-the-badge&label=Auto%20Build" alt="Auto Build">
   </a>
@@ -142,14 +139,6 @@ Contributions are welcome. If you want to help:
 1. Read the [contributing guide](.github/CONTRIBUTING.md).
 2. Run `npm run typecheck` and `npm run build` before opening a PR.
 3. Keep changes focused and explain user-facing impact clearly.
-
-## Support
-
-If you find OpenNOW useful, consider supporting its development:
-
-<a href="https://buymeacoffee.com/zortos">
-  <img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buymeacoffee&logoColor=black" alt="Buy Me a Coffee">
-</a>
 
 ## FAQ
 
