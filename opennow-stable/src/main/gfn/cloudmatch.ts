@@ -4,6 +4,7 @@ import dns from "node:dns";
 import type {
   ActiveSessionInfo,
   IceServer,
+  SessionMonitorSetting,
   SessionClaimRequest,
   SessionCreateRequest,
   SessionInfo,
@@ -15,9 +16,19 @@ import type {
 import {
   colorQualityBitDepth,
   colorQualityChromaFormat,
+  remapResumeAppLaunchMode,
 } from "@shared/gfn";
 
-import type { CloudMatchRequest, CloudMatchResponse, GetSessionsResponse } from "./types";
+import type {
+  ClaimSessionRequestBody,
+  CloudMatchRequest,
+  CloudMatchResponse,
+  GetSessionsResponse,
+  RequestedStreamingFeatures,
+  SessionEntry,
+  SessionRequestData,
+  SessionRequestMetadataEntry,
+} from "./types";
 import { SessionError } from "./errorCodes";
 
 const GFN_USER_AGENT =
@@ -418,98 +429,181 @@ function timezoneOffsetMs(): number {
   return -new Date().getTimezoneOffset() * 60 * 1000;
 }
 
-function buildSessionRequestBody(input: SessionCreateRequest): CloudMatchRequest {
-  const { width, height } = parseResolution(input.settings.resolution);
-  const cq = input.settings.colorQuality;
-  // IMPORTANT: hdrEnabled is a SEPARATE toggle from color quality.
-  // The Rust reference (cloudmatch.rs) uses settings.hdr_enabled independently.
-  // 10-bit color depth does NOT mean HDR — you can have 10-bit SDR.
-  // Conflating them caused the server to set up an HDR pipeline, which
-  // dynamically downscaled resolution to ~540p.
-  const hdrEnabled = false; // No HDR toggle implemented yet; hardcode off like claim body
-  const bitDepth = colorQualityBitDepth(cq);
-  const chromaFormat = colorQualityChromaFormat(cq);
-  const accountLinked = input.accountLinked ?? true;
+function normalizeMonitorSetting(setting: Partial<SessionMonitorSetting> | undefined): SessionMonitorSetting | undefined {
+  if (!setting) {
+    return undefined;
+  }
+
+  const widthInPixels = Number(setting.widthInPixels ?? 0);
+  const heightInPixels = Number(setting.heightInPixels ?? 0);
+  const framesPerSecond = Number(setting.framesPerSecond ?? 0);
+  if (!Number.isFinite(widthInPixels) || !Number.isFinite(heightInPixels) || !Number.isFinite(framesPerSecond)) {
+    return undefined;
+  }
 
   return {
-    sessionRequestData: {
+    widthInPixels,
+    heightInPixels,
+    framesPerSecond,
+    sdrHdrMode: Number(setting.sdrHdrMode ?? 0),
+    displayData: setting.displayData
+      ? {
+          desiredContentMaxLuminance: Number(setting.displayData.desiredContentMaxLuminance ?? 0),
+          desiredContentMinLuminance: Number(setting.displayData.desiredContentMinLuminance ?? 0),
+          desiredContentMaxFrameAverageLuminance: Number(setting.displayData.desiredContentMaxFrameAverageLuminance ?? 0),
+        }
+      : undefined,
+    dpi: typeof setting.dpi === "number" ? setting.dpi : undefined,
+  };
+}
+
+function buildRequestedStreamingFeatures(settings: StreamSettings, hdrEnabled: boolean): RequestedStreamingFeatures {
+  const bitDepth = colorQualityBitDepth(settings.colorQuality);
+  const chromaFormat = colorQualityChromaFormat(settings.colorQuality);
+
+  return {
+    reflex: settings.fps >= 120,
+    bitDepth,
+    cloudGsync: false,
+    enabledL4S: settings.enableL4S,
+    mouseMovementFlags: 0,
+    trueHdr: hdrEnabled,
+    supportedHidDevices: 0,
+    profile: 0,
+    fallbackToLogicalResolution: false,
+    hidDevices: null,
+    chromaFormat,
+    prefilterMode: 0,
+    prefilterSharpness: 0,
+    prefilterNoiseReduction: 0,
+    hudStreamingMode: 0,
+    sdrColorSpace: 2,
+    hdrColorSpace: hdrEnabled ? 4 : 0,
+  };
+}
+
+function buildSessionMetadata(monitorSetting: SessionMonitorSetting): SessionRequestMetadataEntry[] {
+  return [
+    { key: "SubSessionId", value: crypto.randomUUID() },
+    { key: "wssignaling", value: "1" },
+    { key: "GSStreamerType", value: "WebRTC" },
+    { key: "networkType", value: "Unknown" },
+    { key: "ClientImeSupport", value: "0" },
+    {
+      key: "clientPhysicalResolution",
+      value: JSON.stringify({
+        horizontalPixels: monitorSetting.widthInPixels,
+        verticalPixels: monitorSetting.heightInPixels,
+      }),
+    },
+    { key: "surroundAudioInfo", value: "2" },
+  ];
+}
+
+function buildMonitorSettingFromStreamSettings(settings: StreamSettings): SessionMonitorSetting {
+  const { widthInPixels, heightInPixels } = {
+    widthInPixels: parseResolution(settings.resolution).width,
+    heightInPixels: parseResolution(settings.resolution).height,
+  };
+  const hdrEnabled = false;
+  return {
+    widthInPixels,
+    heightInPixels,
+    framesPerSecond: settings.fps,
+    sdrHdrMode: hdrEnabled ? 1 : 0,
+    displayData: {
+      desiredContentMaxLuminance: hdrEnabled ? 1000 : 0,
+      desiredContentMinLuminance: 0,
+      desiredContentMaxFrameAverageLuminance: hdrEnabled ? 500 : 0,
+    },
+    dpi: 100,
+  };
+}
+
+function normalizePrimaryMonitorSetting(
+  monitorSettings: Array<Partial<SessionMonitorSetting>> | undefined,
+  fallbackSettings?: StreamSettings,
+): SessionMonitorSetting {
+  const primary = monitorSettings?.map(normalizeMonitorSetting).find((entry) => entry !== undefined);
+  if (primary) {
+    return primary;
+  }
+  if (fallbackSettings) {
+    return buildMonitorSettingFromStreamSettings(fallbackSettings);
+  }
+  return buildMonitorSettingFromStreamSettings({
+    resolution: "1920x1080",
+    fps: 60,
+    maxBitrateMbps: 75,
+    codec: "H264",
+    colorQuality: "8bit_420",
+    gameLanguage: "en_US",
+    enableL4S: false,
+  });
+}
+
+function buildSessionRequestData(options: {
+  appId: string;
+  internalTitle: string | null;
+  settings: StreamSettings;
+  monitorSettings?: Array<Partial<SessionMonitorSetting>>;
+  accountLinked?: boolean;
+  partnerCustomData?: string;
+  enablePersistingInGameSettings?: boolean;
+  userAge?: number;
+  appLaunchMode: number;
+}): SessionRequestData {
+  const hdrEnabled = false;
+  const primaryMonitorSetting = normalizePrimaryMonitorSetting(options.monitorSettings, options.settings);
+  const requestedStreamingFeatures = buildRequestedStreamingFeatures(options.settings, hdrEnabled);
+
+  return {
+    appId: options.appId,
+    internalTitle: options.internalTitle,
+    availableSupportedControllers: [],
+    networkTestSessionId: null,
+    parentSessionId: null,
+    clientIdentification: "GFN-PC",
+    deviceHashId: crypto.randomUUID(),
+    clientVersion: "30.0",
+    sdkVersion: "1.0",
+    streamerVersion: 1,
+    clientPlatformName: "windows",
+    clientRequestMonitorSettings: [primaryMonitorSetting],
+    useOps: true,
+    audioMode: 2,
+    metaData: buildSessionMetadata(primaryMonitorSetting),
+    sdrHdrMode: primaryMonitorSetting.sdrHdrMode,
+    clientDisplayHdrCapabilities: hdrEnabled
+      ? {
+          version: 1,
+          hdrEdrSupportedFlagsInUint32: 1,
+          staticMetadataDescriptorId: 0,
+        }
+      : null,
+    surroundAudioInfo: 0,
+    remoteControllersBitmap: 0,
+    clientTimezoneOffset: timezoneOffsetMs(),
+    enhancedStreamMode: 1,
+    appLaunchMode: options.appLaunchMode,
+    secureRTSPSupported: false,
+    partnerCustomData: options.partnerCustomData ?? "",
+    accountLinked: options.accountLinked ?? true,
+    enablePersistingInGameSettings: options.enablePersistingInGameSettings ?? true,
+    userAge: options.userAge ?? 26,
+    requestedStreamingFeatures,
+  };
+}
+
+function buildSessionRequestBody(input: SessionCreateRequest): CloudMatchRequest {
+  return {
+    sessionRequestData: buildSessionRequestData({
       appId: input.appId,
       internalTitle: input.internalTitle || null,
-      availableSupportedControllers: [],
-      networkTestSessionId: null,
-      parentSessionId: null,
-      clientIdentification: "GFN-PC",
-      deviceHashId: crypto.randomUUID(),
-      clientVersion: "30.0",
-      sdkVersion: "1.0",
-      streamerVersion: 1,
-      clientPlatformName: "windows",
-      clientRequestMonitorSettings: [
-        {
-          widthInPixels: width,
-          heightInPixels: height,
-          framesPerSecond: input.settings.fps,
-          sdrHdrMode: hdrEnabled ? 1 : 0,
-          displayData: {
-            desiredContentMaxLuminance: hdrEnabled ? 1000 : 0,
-            desiredContentMinLuminance: 0,
-            desiredContentMaxFrameAverageLuminance: hdrEnabled ? 500 : 0,
-          },
-          dpi: 100,
-        },
-      ],
-      useOps: true,
-      audioMode: 2,
-      metaData: [
-        { key: "SubSessionId", value: crypto.randomUUID() },
-        { key: "wssignaling", value: "1" },
-        { key: "GSStreamerType", value: "WebRTC" },
-        { key: "networkType", value: "Unknown" },
-        { key: "ClientImeSupport", value: "0" },
-        {
-          key: "clientPhysicalResolution",
-          value: JSON.stringify({ horizontalPixels: width, verticalPixels: height }),
-        },
-        { key: "surroundAudioInfo", value: "2" },
-      ],
-      sdrHdrMode: hdrEnabled ? 1 : 0,
-      clientDisplayHdrCapabilities: hdrEnabled
-        ? {
-            version: 1,
-            hdrEdrSupportedFlagsInUint32: 1,
-            staticMetadataDescriptorId: 0,
-          }
-        : null,
-      surroundAudioInfo: 0,
-      remoteControllersBitmap: 0,
-      clientTimezoneOffset: timezoneOffsetMs(),
-      enhancedStreamMode: 1,
+      settings: input.settings,
+      accountLinked: input.accountLinked,
       appLaunchMode: 1,
-      secureRTSPSupported: false,
-      partnerCustomData: "",
-      accountLinked,
-      enablePersistingInGameSettings: true,
-      userAge: 26,
-      requestedStreamingFeatures: {
-        reflex: input.settings.fps >= 120,
-        bitDepth,
-        cloudGsync: false,
-        enabledL4S: input.settings.enableL4S,
-        mouseMovementFlags: 0,
-        trueHdr: hdrEnabled,
-        supportedHidDevices: 0,
-        profile: 0,
-        fallbackToLogicalResolution: false,
-        hidDevices: null,
-        chromaFormat,
-        prefilterMode: 0,
-        prefilterSharpness: 0,
-        prefilterNoiseReduction: 0,
-        hudStreamingMode: 0,
-        sdrColorSpace: 2,
-        hdrColorSpace: hdrEnabled ? 4 : 0,
-      },
-    },
+    }),
   };
 }
 
@@ -584,6 +678,25 @@ function extractQueuePosition(payload: CloudMatchResponse): number | undefined {
   }
 
   return undefined;
+}
+
+function sessionMonitorSettings(entry: SessionEntry): SessionMonitorSetting[] | undefined {
+  const normalized = (entry.monitorSettings ?? entry.sessionRequestData?.clientRequestMonitorSettings ?? [])
+    .map(normalizeMonitorSetting)
+    .filter((setting): setting is SessionMonitorSetting => setting !== undefined);
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function sessionResolutionAndFps(entry: SessionEntry): { resolution?: string; fps?: number } {
+  const primaryMonitor = sessionMonitorSettings(entry)?.[0];
+  if (!primaryMonitor) {
+    return {};
+  }
+
+  return {
+    resolution: `${primaryMonitor.widthInPixels}x${primaryMonitor.heightInPixels}`,
+    fps: primaryMonitor.framesPerSecond,
+  };
 }
 
 function extractSeatSetupStep(payload: CloudMatchResponse): number | undefined {
@@ -841,12 +954,8 @@ export async function getActiveSessions(
           ? `wss://${controlIp}:443/nvst/`
           : undefined;
 
-      // Extract resolution and fps from monitor settings
-      const monitorSettings = s.monitorSettings?.[0];
-      const resolution = monitorSettings
-        ? `${monitorSettings.widthInPixels ?? 0}x${monitorSettings.heightInPixels ?? 0}`
-        : undefined;
-      const fps = monitorSettings?.framesPerSecond ?? undefined;
+      const monitorSettings = sessionMonitorSettings(s);
+      const { resolution, fps } = sessionResolutionAndFps(s);
 
       return {
         sessionId: s.sessionId,
@@ -857,73 +966,42 @@ export async function getActiveSessions(
         signalingUrl,
         resolution,
         fps,
+        appLaunchMode: s.sessionRequestData?.appLaunchMode,
+        accountLinked: s.sessionRequestData?.accountLinked,
+        partnerCustomData: s.sessionRequestData?.partnerCustomData,
+        enablePersistingInGameSettings: s.sessionRequestData?.enablePersistingInGameSettings,
+        userAge: s.sessionRequestData?.userAge,
+        monitorSettings,
       };
     });
 
   return activeSessions;
 }
 
-/**
- * Build claim/resume request payload
- */
-function buildClaimRequestBody(sessionId: string, appId: string, settings: StreamSettings): unknown {
-  // For RESUME claims, we must NOT attempt to renegotiate streaming parameters.
-  // The session is already configured on the server side. Sending different fps, resolution,
-  // codec, etc. causes HTTP 400 from the server because those parameters are immutable for
-  // an already-streaming session. Only send the action and minimal required fields.
-  const deviceId = crypto.randomUUID();
-  const subSessionId = crypto.randomUUID();
-  const timezoneMs = timezoneOffsetMs();
-
+function buildClaimRequestBody(input: {
+  appId: string;
+  settings: StreamSettings;
+  appLaunchMode?: number;
+  accountLinked?: boolean;
+  partnerCustomData?: string;
+  enablePersistingInGameSettings?: boolean;
+  userAge?: number;
+  monitorSettings?: Array<Partial<SessionMonitorSetting>>;
+}): ClaimSessionRequestBody {
   return {
     action: 2,
     data: "RESUME",
-    sessionRequestData: {
-      // Minimal fields required for resume - NO streaming parameter renegotiation
-      audioMode: 2,
-      remoteControllersBitmap: 0,
-      sdrHdrMode: 0,
-      networkTestSessionId: null,
-      availableSupportedControllers: [],
-      clientVersion: "30.0",
-      deviceHashId: deviceId,
+    sessionRequestData: buildSessionRequestData({
+      appId: input.appId,
       internalTitle: null,
-      clientPlatformName: "windows",
-      metaData: [
-        { key: "SubSessionId", value: subSessionId },
-        { key: "wssignaling", value: "1" },
-        { key: "GSStreamerType", value: "WebRTC" },
-        { key: "networkType", value: "Unknown" },
-        { key: "ClientImeSupport", value: "0" },
-      ],
-      surroundAudioInfo: 0,
-      clientTimezoneOffset: timezoneMs,
-      clientIdentification: "GFN-PC",
-      parentSessionId: null,
-      appId: parseInt(appId, 10),
-      streamerVersion: 1,
-      appLaunchMode: 1,
-      sdkVersion: "1.0",
-      enhancedStreamMode: 1,
-      useOps: true,
-      clientDisplayHdrCapabilities: null,
-      accountLinked: true,
-      partnerCustomData: "",
-      enablePersistingInGameSettings: true,
-      secureRTSPSupported: false,
-      userAge: 26,
-      requestedStreamingFeatures: {
-        reflex: false,
-        bitDepth: 0,
-        cloudGsync: false,
-        enabledL4S: false,
-        profile: 0,
-        fallbackToLogicalResolution: false,
-        chromaFormat: 0,
-        prefilterMode: 0,
-        hudStreamingMode: 0,
-      },
-    },
+      settings: input.settings,
+      monitorSettings: input.monitorSettings,
+      accountLinked: input.accountLinked,
+      partnerCustomData: input.partnerCustomData,
+      enablePersistingInGameSettings: input.enablePersistingInGameSettings,
+      userAge: input.userAge,
+      appLaunchMode: remapResumeAppLaunchMode(input.appLaunchMode),
+    }),
     metaData: [],
   };
 }
@@ -1013,7 +1091,16 @@ export async function claimSession(input: SessionClaimRequest): Promise<SessionI
     console.warn("[CloudMatch] claimSession: pre-claim validation failed:", e);
   }
 
-  const payload = buildClaimRequestBody(input.sessionId, appId, settings);
+  const payload = buildClaimRequestBody({
+    appId,
+    settings,
+    appLaunchMode: input.appLaunchMode,
+    accountLinked: input.accountLinked,
+    partnerCustomData: input.partnerCustomData,
+    enablePersistingInGameSettings: input.enablePersistingInGameSettings,
+    userAge: input.userAge,
+    monitorSettings: input.monitorSettings,
+  });
 
   const headers: Record<string, string> = {
     "User-Agent": GFN_USER_AGENT,

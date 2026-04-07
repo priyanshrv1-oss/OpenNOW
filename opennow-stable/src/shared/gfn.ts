@@ -234,6 +234,32 @@ export interface StreamSettings {
   enableL4S: boolean;
 }
 
+export interface SessionDisplayData {
+  desiredContentMaxLuminance: number;
+  desiredContentMinLuminance: number;
+  desiredContentMaxFrameAverageLuminance: number;
+}
+
+export interface SessionMonitorSetting {
+  widthInPixels: number;
+  heightInPixels: number;
+  framesPerSecond: number;
+  sdrHdrMode: number;
+  displayData?: SessionDisplayData;
+  dpi?: number;
+}
+
+export function remapResumeAppLaunchMode(appLaunchMode?: number): number {
+  switch (appLaunchMode) {
+    case 2:
+      return 3;
+    case 1:
+      return 2;
+    default:
+      return 1;
+  }
+}
+
 export interface SessionCreateRequest {
   token?: string;
   streamingBaseUrl?: string;
@@ -302,6 +328,12 @@ export interface ActiveSessionInfo {
   signalingUrl?: string;
   resolution?: string;
   fps?: number;
+  appLaunchMode?: number;
+  accountLinked?: boolean;
+  partnerCustomData?: string;
+  enablePersistingInGameSettings?: boolean;
+  userAge?: number;
+  monitorSettings?: SessionMonitorSetting[];
 }
 
 /** Request to claim/resume an existing session */
@@ -312,6 +344,12 @@ export interface SessionClaimRequest {
   serverIp: string;
   appId?: string;
   settings?: StreamSettings;
+  appLaunchMode?: number;
+  accountLinked?: boolean;
+  partnerCustomData?: string;
+  enablePersistingInGameSettings?: boolean;
+  userAge?: number;
+  monitorSettings?: SessionMonitorSetting[];
 }
 
 export interface SignalingConnectRequest {

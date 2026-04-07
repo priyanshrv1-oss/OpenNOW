@@ -1508,6 +1508,12 @@ export function App(): JSX.Element {
       serverIp: existingSession.serverIp,
       sessionId: existingSession.sessionId,
       appId: String(existingSession.appId),
+      appLaunchMode: existingSession.appLaunchMode,
+      accountLinked: existingSession.accountLinked,
+      partnerCustomData: existingSession.partnerCustomData,
+      enablePersistingInGameSettings: existingSession.enablePersistingInGameSettings,
+      userAge: existingSession.userAge,
+      monitorSettings: existingSession.monitorSettings,
       settings: {
         resolution: settings.resolution,
         fps: settings.fps,

@@ -1,69 +1,75 @@
+import type { SessionMonitorSetting } from "@shared/gfn";
+
 import type { SessionError, SessionErrorInfo } from "./errorCodes";
 
+export interface SessionRequestMetadataEntry {
+  key: string;
+  value: string;
+}
+
+export interface RequestedStreamingFeatures {
+  reflex: boolean;
+  bitDepth: number;
+  cloudGsync: boolean;
+  enabledL4S: boolean;
+  mouseMovementFlags: number;
+  trueHdr: boolean;
+  supportedHidDevices: number;
+  profile: number;
+  fallbackToLogicalResolution: boolean;
+  hidDevices: string | null;
+  chromaFormat: number;
+  prefilterMode: number;
+  prefilterSharpness: number;
+  prefilterNoiseReduction: number;
+  hudStreamingMode: number;
+  sdrColorSpace: number;
+  hdrColorSpace: number;
+}
+
+export interface SessionRequestData {
+  appId: string | number;
+  internalTitle: string | null;
+  availableSupportedControllers: number[];
+  networkTestSessionId: string | null;
+  parentSessionId: string | null;
+  clientIdentification: string;
+  deviceHashId: string;
+  clientVersion: string;
+  sdkVersion: string;
+  streamerVersion: number;
+  clientPlatformName: string;
+  clientRequestMonitorSettings: SessionMonitorSetting[];
+  useOps: boolean;
+  audioMode: number;
+  metaData: SessionRequestMetadataEntry[];
+  sdrHdrMode: number;
+  clientDisplayHdrCapabilities: {
+    version: number;
+    hdrEdrSupportedFlagsInUint32: number;
+    staticMetadataDescriptorId: number;
+  } | null;
+  surroundAudioInfo: number;
+  remoteControllersBitmap: number;
+  clientTimezoneOffset: number;
+  enhancedStreamMode: number;
+  appLaunchMode: number;
+  secureRTSPSupported: boolean;
+  partnerCustomData: string;
+  accountLinked: boolean;
+  enablePersistingInGameSettings: boolean;
+  userAge: number;
+  requestedStreamingFeatures: RequestedStreamingFeatures;
+}
+
 export interface CloudMatchRequest {
-  sessionRequestData: {
-    appId: string;
-    internalTitle: string | null;
-    availableSupportedControllers: number[];
-    networkTestSessionId: string | null;
-    parentSessionId: string | null;
-    clientIdentification: string;
-    deviceHashId: string;
-    clientVersion: string;
-    sdkVersion: string;
-    streamerVersion: number;
-    clientPlatformName: string;
-    clientRequestMonitorSettings: Array<{
-      widthInPixels: number;
-      heightInPixels: number;
-      framesPerSecond: number;
-      sdrHdrMode: number;
-      displayData: {
-        desiredContentMaxLuminance: number;
-        desiredContentMinLuminance: number;
-        desiredContentMaxFrameAverageLuminance: number;
-      };
-      dpi: number;
-    }>;
-    useOps: boolean;
-    audioMode: number;
-    metaData: Array<{ key: string; value: string }>;
-    sdrHdrMode: number;
-    clientDisplayHdrCapabilities: {
-      version: number;
-      hdrEdrSupportedFlagsInUint32: number;
-      staticMetadataDescriptorId: number;
-    } | null;
-    surroundAudioInfo: number;
-    remoteControllersBitmap: number;
-    clientTimezoneOffset: number;
-    enhancedStreamMode: number;
-    appLaunchMode: number;
-    secureRTSPSupported: boolean;
-    partnerCustomData: string;
-    accountLinked: boolean;
-    enablePersistingInGameSettings: boolean;
-    userAge: number;
-    requestedStreamingFeatures: {
-      reflex: boolean;
-      bitDepth: number;
-      cloudGsync: boolean;
-      enabledL4S: boolean;
-      mouseMovementFlags: number;
-      trueHdr: boolean;
-      supportedHidDevices: number;
-      profile: number;
-      fallbackToLogicalResolution: boolean;
-      hidDevices: string | null;
-      chromaFormat: number;
-      prefilterMode: number;
-      prefilterSharpness: number;
-      prefilterNoiseReduction: number;
-      hudStreamingMode: number;
-      sdrColorSpace: number;
-      hdrColorSpace: number;
-    };
-  };
+  sessionRequestData: SessionRequestData;
+}
+
+export interface ClaimSessionRequestBody extends CloudMatchRequest {
+  action: 2;
+  data: "RESUME";
+  metaData: SessionRequestMetadataEntry[];
 }
 
 export interface CloudMatchResponse {
@@ -120,10 +126,7 @@ export interface SessionEntry {
   sessionId: string;
   status: number;
   gpuType?: string;
-  sessionRequestData?: {
-    appId?: string;
-    [key: string]: unknown;
-  };
+  sessionRequestData?: Partial<SessionRequestData>;
   sessionControlInfo?: {
     ip?: string;
   };
@@ -133,11 +136,7 @@ export interface SessionEntry {
     usage: number;
     protocol?: number;
   }>;
-  monitorSettings?: Array<{
-    widthInPixels?: number;
-    heightInPixels?: number;
-    framesPerSecond?: number;
-  }>;
+  monitorSettings?: Array<Partial<SessionMonitorSetting>>;
 }
 
 /** Response from GET /v2/session (list of sessions) */
