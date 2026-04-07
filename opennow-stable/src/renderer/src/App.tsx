@@ -15,6 +15,7 @@ import type {
   StreamRegion,
   VideoCodec,
 } from "@shared/gfn";
+import { DEFAULT_KEYBOARD_LAYOUT } from "@shared/gfn";
 
 import {
   GfnWebRtcClient,
@@ -424,6 +425,7 @@ export function App(): JSX.Element {
     sessionClockShowDurationSeconds: 30,
     windowWidth: 1400,
     windowHeight: 900,
+    keyboardLayout: DEFAULT_KEYBOARD_LAYOUT,
     gameLanguage: "en_US",
     enableL4S: false,
   });
@@ -1520,6 +1522,7 @@ export function App(): JSX.Element {
         maxBitrateMbps: settings.maxBitrateMbps,
         codec: settings.codec,
         colorQuality: settings.colorQuality,
+        keyboardLayout: settings.keyboardLayout,
         gameLanguage: settings.gameLanguage,
         enableL4S: settings.enableL4S,
       },
@@ -1667,6 +1670,7 @@ export function App(): JSX.Element {
           maxBitrateMbps: settings.maxBitrateMbps,
           codec: settings.codec,
           colorQuality: settings.colorQuality,
+          keyboardLayout: settings.keyboardLayout,
           gameLanguage: settings.gameLanguage,
           enableL4S: settings.enableL4S,
         },

@@ -3,6 +3,8 @@ import dns from "node:dns";
 
 import type {
   ActiveSessionInfo,
+  ColorQuality,
+  NegotiatedStreamProfile,
   IceServer,
   SessionMonitorSetting,
   SessionClaimRequest,
@@ -14,9 +16,11 @@ import type {
 } from "@shared/gfn";
 
 import {
+  DEFAULT_KEYBOARD_LAYOUT,
   colorQualityBitDepth,
   colorQualityChromaFormat,
   remapResumeAppLaunchMode,
+  resolveGfnKeyboardLayout,
 } from "@shared/gfn";
 
 import type {
@@ -642,6 +646,63 @@ function extractSeatSetupStep(payload: CloudMatchResponse): number | undefined {
   return undefined;
 }
 
+function toColorQuality(bitDepth?: number, chromaFormat?: number): ColorQuality | undefined {
+  if (bitDepth !== 0 && bitDepth !== 10) {
+    return undefined;
+  }
+  if (chromaFormat !== 0 && chromaFormat !== 2) {
+    return undefined;
+  }
+
+  if (bitDepth === 10) {
+    return chromaFormat === 2 ? "10bit_444" : "10bit_420";
+  }
+
+  return chromaFormat === 2 ? "8bit_444" : "8bit_420";
+}
+
+function extractNegotiatedStreamProfile(payload: CloudMatchResponse): NegotiatedStreamProfile | undefined {
+  const monitor = payload.session.sessionRequestData?.clientRequestMonitorSettings?.[0];
+  const finalizedFeatures = payload.session.finalizedStreamingFeatures;
+  const requestedFeatures = payload.session.sessionRequestData?.requestedStreamingFeatures;
+
+  const width = monitor?.widthInPixels;
+  const height = monitor?.heightInPixels;
+  const fps = monitor?.framesPerSecond;
+  const colorQuality = toColorQuality(
+    finalizedFeatures?.bitDepth ?? requestedFeatures?.bitDepth,
+    finalizedFeatures?.chromaFormat ?? requestedFeatures?.chromaFormat,
+  );
+  const enabledL4S = finalizedFeatures?.enabledL4S ?? requestedFeatures?.enabledL4S;
+
+  const profile: NegotiatedStreamProfile = {};
+
+  if (
+    typeof width === "number" &&
+    Number.isFinite(width) &&
+    width > 0 &&
+    typeof height === "number" &&
+    Number.isFinite(height) &&
+    height > 0
+  ) {
+    profile.resolution = `${Math.trunc(width)}x${Math.trunc(height)}`;
+  }
+
+  if (typeof fps === "number" && Number.isFinite(fps) && fps > 0) {
+    profile.fps = Math.trunc(fps);
+  }
+
+  if (colorQuality) {
+    profile.colorQuality = colorQuality;
+  }
+
+  if (typeof enabledL4S === "boolean") {
+    profile.enableL4S = enabledL4S;
+  }
+
+  return Object.keys(profile).length > 0 ? profile : undefined;
+}
+
 interface ToSessionInfoOptions {
   zone: string;
   streamingBaseUrl: string;
@@ -693,6 +754,7 @@ async function toSessionInfo(options: ToSessionInfoOptions): Promise<SessionInfo
     gpuType: payload.session.gpuType,
     iceServers: await normalizeIceServers(payload),
     mediaConnectionInfo: signaling.mediaConnectionInfo,
+    negotiatedStreamProfile: extractNegotiatedStreamProfile(payload),
     clientId,
     deviceId,
   };
@@ -714,8 +776,9 @@ export async function createSession(input: SessionCreateRequest): Promise<Sessio
   const body = buildSessionRequestBody(input);
 
   const base = resolveStreamingBaseUrl(input.zone, input.streamingBaseUrl);
+  const keyboardLayout = resolveGfnKeyboardLayout(input.settings.keyboardLayout ?? DEFAULT_KEYBOARD_LAYOUT, process.platform);
   const languageCode = input.settings.gameLanguage ?? "en_US";
-  const url = `${base}/v2/session?keyboardLayout=en-US&languageCode=${languageCode}`;
+  const url = `${base}/v2/session?${new URLSearchParams({ keyboardLayout, languageCode }).toString()}`;
   const response = await fetch(url, {
     method: "POST",
     headers: requestHeaders({ token: input.token, clientId, deviceId, includeOrigin: true }),
@@ -961,10 +1024,12 @@ export async function claimSession(input: SessionClaimRequest): Promise<SessionI
     maxBitrateMbps: 75,
     codec: "H264",
     colorQuality: "8bit_420",
+    keyboardLayout: DEFAULT_KEYBOARD_LAYOUT,
     gameLanguage: "en_US",
     enableL4S: false,
   };
 
+  const keyboardLayout = resolveGfnKeyboardLayout(settings.keyboardLayout ?? DEFAULT_KEYBOARD_LAYOUT, process.platform);
   const languageCode = settings.gameLanguage ?? "en_US";
 
   // The session list endpoint returns the zone LB hostname in sessionControlInfo.ip.
@@ -1001,7 +1066,7 @@ export async function claimSession(input: SessionClaimRequest): Promise<SessionI
     }
   }
 
-  const claimUrl = `https://${effectiveServerIp}/v2/session/${input.sessionId}?keyboardLayout=en-US&languageCode=${languageCode}`;
+  const claimUrl = `https://${effectiveServerIp}/v2/session/${input.sessionId}?${new URLSearchParams({ keyboardLayout, languageCode }).toString()}`;
 
   // Pre-claim validation: verify the session is still alive and in ready state before attempting claim
   // This prevents sending a claim to an expired/dead session
@@ -1128,6 +1193,7 @@ export async function claimSession(input: SessionClaimRequest): Promise<SessionI
         gpuType: sessionData.gpuType,
         iceServers: await normalizeIceServers(pollApiResponse),
         mediaConnectionInfo: signaling.mediaConnectionInfo,
+        negotiatedStreamProfile: extractNegotiatedStreamProfile(pollApiResponse),
       };
     }
 
