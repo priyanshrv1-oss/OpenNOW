@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
-import type { GameInfo, MediaListingEntry, MediaSessionSummary, Settings } from "@shared/gfn";
+import type { GameInfo, MediaExportBrowserResult, MediaListingEntry, MediaSessionSummary, Settings } from "@shared/gfn";
 import { Star, Clock, Calendar, Repeat2, FolderOpen, Share2, Trash2 } from "lucide-react";
 import { ButtonA, ButtonB, ButtonX, ButtonY, ButtonPSCross, ButtonPSCircle, ButtonPSSquare, ButtonPSTriangle } from "./ControllerButtons";
 import { getStoreDisplayName } from "./GameCard";
@@ -160,6 +160,7 @@ export function ControllerLibraryPage({
   const currentPosterImgRef = useRef<HTMLImageElement | null>(null);
   const [metaMaxWidth, setMetaMaxWidth] = useState<number | null>(null);
   const posterObserverRef = useRef<ResizeObserver | null>(null);
+  const gameHubExportBrowseRequestIdRef = useRef(0);
   const attachPosterRef = (el: HTMLImageElement | null) => {
     if (posterObserverRef.current) {
       try { posterObserverRef.current.disconnect(); } catch {}
@@ -200,6 +201,11 @@ export function ControllerLibraryPage({
   const [gameHubActionBusy, setGameHubActionBusy] = useState<"reveal" | "export" | "delete" | null>(null);
   const [gameHubActionMessage, setGameHubActionMessage] = useState<string | null>(null);
   const [isGameHubExpanded, setIsGameHubExpanded] = useState(false);
+  const [isGameHubExportBrowserOpen, setIsGameHubExportBrowserOpen] = useState(false);
+  const [gameHubExportBrowser, setGameHubExportBrowser] = useState<MediaExportBrowserResult | null>(null);
+  const [gameHubExportBrowserLoading, setGameHubExportBrowserLoading] = useState(false);
+  const [gameHubExportOverwritePending, setGameHubExportOverwritePending] = useState(false);
+  const [lastGameHubExportDirectoryPath, setLastGameHubExportDirectoryPath] = useState<string | null>(null);
   const [controllerType, setControllerType] = useState<"ps" | "xbox" | "nintendo" | "generic">("generic");
   const [editingBandwidth, setEditingBandwidth] = useState(false);
 
@@ -638,24 +644,97 @@ export function ControllerLibraryPage({
     }
   }, [playUiSound, selectedGameHubMedia]);
 
+  const closeGameHubExportBrowser = useCallback((clearMessage = true) => {
+    gameHubExportBrowseRequestIdRef.current += 1;
+    setIsGameHubExportBrowserOpen(false);
+    setGameHubExportBrowser(null);
+    setGameHubExportBrowserLoading(false);
+    setGameHubExportOverwritePending(false);
+    if (clearMessage) {
+      setGameHubActionMessage(null);
+    }
+  }, []);
+
+  const loadGameHubExportBrowser = useCallback(async (directoryPath?: string) => {
+    if (typeof window.openNow?.browseMediaExportLocations !== "function") {
+      throw new Error("Export browser unavailable");
+    }
+
+    const requestId = gameHubExportBrowseRequestIdRef.current + 1;
+    gameHubExportBrowseRequestIdRef.current = requestId;
+    setGameHubExportBrowserLoading(true);
+    setGameHubActionMessage(null);
+    setGameHubExportOverwritePending(false);
+
+    try {
+      const result = await window.openNow.browseMediaExportLocations(
+        directoryPath ? { directoryPath } : {},
+      );
+      if (gameHubExportBrowseRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      setGameHubExportBrowser(result);
+      setLastGameHubExportDirectoryPath(result.currentPath);
+    } finally {
+      if (gameHubExportBrowseRequestIdRef.current === requestId) {
+        setGameHubExportBrowserLoading(false);
+      }
+    }
+  }, []);
+
   const handleGameHubExport = useCallback(async () => {
-    if (!selectedGameHubMedia || typeof window.openNow?.exportMedia !== "function") return;
+    if (!selectedGameHubMedia) return;
+    setIsGameHubExportBrowserOpen(true);
+    setGameHubExportBrowser(null);
+    try {
+      await loadGameHubExportBrowser(lastGameHubExportDirectoryPath ?? undefined);
+      playUiSound("confirm");
+    } catch {
+      closeGameHubExportBrowser(false);
+      setGameHubActionMessage("Unable to browse export folders.");
+    }
+  }, [closeGameHubExportBrowser, lastGameHubExportDirectoryPath, loadGameHubExportBrowser, playUiSound, selectedGameHubMedia]);
+
+  const handleGameHubExportNavigate = useCallback(async (directoryPath: string) => {
+    try {
+      await loadGameHubExportBrowser(directoryPath);
+      playUiSound("move");
+    } catch {
+      setGameHubActionMessage("Unable to open that folder.");
+    }
+  }, [loadGameHubExportBrowser, playUiSound]);
+
+  const handleGameHubExportSubmit = useCallback(async () => {
+    if (!selectedGameHubMedia || !gameHubExportBrowser || typeof window.openNow?.exportMedia !== "function") return;
+
     setGameHubActionBusy("export");
     setGameHubActionMessage(null);
     try {
       const result = await window.openNow.exportMedia({
         filePath: selectedGameHubMedia.filePath,
         fileName: selectedGameHubMedia.fileName,
+        destinationDirectoryPath: gameHubExportBrowser.currentPath,
+        overwrite: gameHubExportOverwritePending,
       });
+
       if (result.saved) {
+        setLastGameHubExportDirectoryPath(gameHubExportBrowser.currentPath);
+        closeGameHubExportBrowser();
         playUiSound("confirm");
+        return;
+      }
+
+      if (result.alreadyExists) {
+        setGameHubExportOverwritePending(true);
+        setGameHubActionMessage("A file with that name already exists here.");
       }
     } catch {
       setGameHubActionMessage("Unable to export moment.");
     } finally {
       setGameHubActionBusy(null);
     }
-  }, [playUiSound, selectedGameHubMedia]);
+  }, [closeGameHubExportBrowser, gameHubExportBrowser, gameHubExportOverwritePending, playUiSound, selectedGameHubMedia]);
 
   const handleGameHubDelete = useCallback(async () => {
     if (!selectedGameHubMedia) return;
@@ -688,6 +767,10 @@ export function ControllerLibraryPage({
       setSelectedGameHubMediaIndex(0);
       setGameHubActionMessage(null);
       setIsGameHubExpanded(false);
+      setIsGameHubExportBrowserOpen(false);
+      setGameHubExportBrowser(null);
+      setGameHubExportBrowserLoading(false);
+      setGameHubExportOverwritePending(false);
       setGameHubMediaLoading(false);
       return;
     }
@@ -746,7 +829,20 @@ export function ControllerLibraryPage({
     setSelectedGameHubMediaIndex(0);
     setGameHubActionMessage(null);
     setIsGameHubExpanded(false);
+    setIsGameHubExportBrowserOpen(false);
+    setGameHubExportBrowser(null);
+    setGameHubExportBrowserLoading(false);
+    setGameHubExportOverwritePending(false);
   }, [selectedGame?.id]);
+
+  useEffect(() => {
+    if (isGameHubExpanded) return;
+    gameHubExportBrowseRequestIdRef.current += 1;
+    setIsGameHubExportBrowserOpen(false);
+    setGameHubExportBrowser(null);
+    setGameHubExportBrowserLoading(false);
+    setGameHubExportOverwritePending(false);
+  }, [isGameHubExpanded]);
 
 
 
@@ -934,6 +1030,16 @@ export function ControllerLibraryPage({
         playUiSound("confirm");
         return;
       }
+      if (showGameHub && isGameHubExpanded) {
+        const buttons = getGameHubButtons();
+        const activeButton = document.activeElement instanceof HTMLButtonElement && buttons.includes(document.activeElement)
+          ? document.activeElement
+          : buttons[0] ?? null;
+        if (activeButton) {
+          activeButton.click();
+        }
+        return;
+      }
       if (topCategory === "current") {
         const item = displayItems[selectedSettingIndex];
         if (item?.id === "resume" && currentStreamingGame && onResumeGame) {
@@ -1015,6 +1121,11 @@ export function ControllerLibraryPage({
     };
 
     const secondaryActivateHandler = () => {
+      if (showGameHub && isGameHubExpanded && isGameHubExportBrowserOpen) {
+        closeGameHubExportBrowser();
+        playUiSound("move");
+        return;
+      }
       if (showGameHub) {
         setIsGameHubExpanded((prev) => !prev);
         playUiSound("confirm");
@@ -1101,6 +1212,9 @@ export function ControllerLibraryPage({
     };
 
     const tertiaryActivateHandler = () => {
+      if (showGameHub && isGameHubExpanded && isGameHubExportBrowserOpen) {
+        return;
+      }
       if (showGameHub && isGameHubExpanded && selectedGameHubMedia) {
         void handleGameHubDelete();
         return;
@@ -1127,6 +1241,12 @@ export function ControllerLibraryPage({
         return;
       }
       if (showGameHub) {
+        if (isGameHubExportBrowserOpen) {
+          closeGameHubExportBrowser();
+          playUiSound("move");
+          e.preventDefault();
+          return;
+        }
         if (isGameHubExpanded) {
           setIsGameHubExpanded(false);
         }
@@ -1180,6 +1300,10 @@ export function ControllerLibraryPage({
         return;
       }
       if (e.key === "Backspace" || e.key === "Escape") {
+        if (showGameHub && isGameHubExpanded) {
+          cancelHandler(e);
+          return;
+        }
         if (topCategory === "settings" && settingsSubcategory !== "root") {
           cancelHandler(e);
           return;
@@ -1217,7 +1341,7 @@ export function ControllerLibraryPage({
       window.removeEventListener("opennow:controller-cancel", cancelHandler);
       window.removeEventListener("keydown", kbdHandler);
     };
-  }, [isLoading, TOP_CATEGORIES.length, categorizedGames, selectedIndex, selectedGame, selectedVariantId, onPlayGame, onSelectGameVariant, onOpenSettings, playUiSound, throttledOnSelectGame, toggleFavoriteForSelected, topCategory, selectedSettingIndex, selectedMediaIndex, displayItems, mediaAssetItems.length, mediaSubcategory, settings, settingsBySubcategory, settingsSubcategory, lastRootSettingIndex, lastRootMediaIndex, onSettingChange, resolutionOptions, fpsOptions, codecOptions, aspectRatioOptions, currentStreamingGame, onResumeGame, onCloseGame, onExitControllerMode, onExitApp, editingBandwidth, showGameHub, selectedGameHubMedia, handleGameHubReveal, handleGameHubExport, handleGameHubDelete, gameHubMedia.length, selectedGameHubMediaIndex, moveGameHubFocus]);
+  }, [isLoading, TOP_CATEGORIES.length, categorizedGames, selectedIndex, selectedGame, selectedVariantId, onPlayGame, onSelectGameVariant, onOpenSettings, playUiSound, throttledOnSelectGame, toggleFavoriteForSelected, topCategory, selectedSettingIndex, selectedMediaIndex, displayItems, mediaAssetItems.length, mediaSubcategory, settings, settingsBySubcategory, settingsSubcategory, lastRootSettingIndex, lastRootMediaIndex, onSettingChange, resolutionOptions, fpsOptions, codecOptions, aspectRatioOptions, currentStreamingGame, onResumeGame, onCloseGame, onExitControllerMode, onExitApp, editingBandwidth, showGameHub, isGameHubExpanded, isGameHubExportBrowserOpen, selectedGameHubMedia, handleGameHubReveal, handleGameHubExport, handleGameHubDelete, gameHubMedia.length, selectedGameHubMediaIndex, moveGameHubFocus, closeGameHubExportBrowser]);
 
   const renderFaceButton = (kind: "primary" | "secondary" | "tertiary", className: string, size: number): JSX.Element => {
     if (kind === "primary") {
@@ -1545,115 +1669,213 @@ export function ControllerLibraryPage({
           {showGameHub && isGameHubExpanded && selectedGame && (
             <div className="xmb-game-hub">
               <div className="xmb-game-hub-panel">
-                <div className="xmb-game-hub-eyebrow">{topCategory === "all" ? "Game Hub" : selectedCategoryLabel}</div>
-                <div className="xmb-game-hub-title-row">
-                  {favoriteGameIdSet.has(selectedGame.id) && <Star className="xmb-game-hub-favorite" />}
-                  <div className="xmb-game-hub-title">{selectedGame.title}</div>
-                </div>
-                <p className="xmb-game-hub-description">{selectedGameDescription}</p>
-                <div className="xmb-game-meta xmb-game-hub-meta">
-                  {selectedGameSessionState && <span className="xmb-game-meta-chip xmb-game-meta-chip--session">{selectedGameSessionState}</span>}
-                </div>
-
-                {gameHubSummary && (
-                  <div className="xmb-game-hub-snapshot">
-                    <div className="xmb-game-hub-section-title">Session Snapshot</div>
-                    <div className="xmb-game-meta xmb-game-hub-meta">
-                      {gameHubSnapshotChips.map((chip, index) => (
-                        <span key={`${index}-${chip}`} className="xmb-game-meta-chip">
-                          {chip}
-                        </span>
-                      ))}
+                {isGameHubExportBrowserOpen && selectedGameHubMedia ? (
+                  <div className="xmb-export-browser">
+                    <div className="xmb-game-hub-eyebrow">Export Moment</div>
+                    <div className="xmb-game-hub-title-row">
+                      <div className="xmb-game-hub-title">Choose Destination</div>
                     </div>
-                    {gameHubSnapshotCaption && <div className="xmb-game-hub-snapshot-caption">{gameHubSnapshotCaption}</div>}
-                  </div>
-                )}
+                    <div className="xmb-export-browser-file">{selectedGameHubMedia.fileName}</div>
+                    <div className="xmb-export-browser-path">
+                      {gameHubExportBrowser?.currentPath ?? "Loading folders..."}
+                    </div>
 
-                <div className="xmb-game-hub-captures">
-                  {gameHubMediaLoading ? (
-                    <div className="xmb-game-hub-capture-empty">Scanning recent captures...</div>
-                  ) : gameHubMedia.length === 0 ? (
-                    <div className="xmb-game-hub-capture-empty">No recent captures.</div>
-                  ) : (
-                    <>
-                      <div className="xmb-game-hub-section-title">Recent Captures</div>
-                      <div className="xmb-game-hub-capture-grid">
-                        {gameHubMedia.map((item, index) => {
-                        const isActiveMoment = selectedGameHubMedia?.id === item.id;
-                        const thumb = mediaThumbById[item.id] ?? item.thumbnailDataUrl ?? item.dataUrl;
-                        const captureLabel = item.kind === "video"
-                          ? `${Math.max(1, Math.round((item.durationMs ?? 0) / 1000))}s Clip`
-                          : "Screenshot";
-                        const captureStats = [
-                          item.sessionSnapshot?.resolution,
-                          formatMediaBitrate(item.sessionSnapshot?.bitrateKbps),
-                          typeof item.sessionSnapshot?.rttMs === "number" && Number.isFinite(item.sessionSnapshot.rttMs)
-                            ? `${Math.round(item.sessionSnapshot.rttMs)} ms`
-                            : null,
-                        ].filter((value): value is string => Boolean(value));
-
-                        return (
+                    <div className="xmb-export-browser-section">
+                      <div className="xmb-game-hub-section-title">Quick Locations</div>
+                      <div className="xmb-export-browser-quick-grid">
+                        {(gameHubExportBrowser?.quickLocations ?? []).map((location) => (
                           <button
-                            key={item.id}
+                            key={location.id}
                             type="button"
-                            className={`xmb-game-hub-capture ${isActiveMoment ? "active" : ""}`}
-                            data-hub-media-index={index}
-                            onClick={() => {
-                              setSelectedGameHubMediaIndex(gameHubMedia.findIndex((media) => media.id === item.id));
-                              setGameHubActionMessage(null);
-                            }}
+                            className="xmb-export-browser-quick"
+                            onClick={() => { void handleGameHubExportNavigate(location.path); }}
+                            disabled={gameHubExportBrowserLoading || gameHubActionBusy === "export"}
                           >
-                            {thumb && <img src={thumb} alt={item.fileName} className="xmb-game-hub-capture-image" />}
-                            <div className="xmb-game-hub-capture-meta">
-                              <div className="xmb-game-hub-capture-name">{captureLabel}</div>
-                              {captureStats.length > 0 && <div className="xmb-game-hub-capture-stats">{captureStats.join(" • ")}</div>}
-                              <div className="xmb-game-hub-capture-date">{new Date(item.createdAtMs).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</div>
-                            </div>
+                            {location.label}
                           </button>
-                        );
-                      })}
+                        ))}
                       </div>
+                    </div>
 
-                      {selectedGameHubMedia && (
-                        <div className="xmb-game-hub-actions-wrap">
-                          <div className="xmb-game-hub-actions-header">
-                            Selected Moment: {selectedGameHubMedia.gameTitle || selectedGameHubMedia.fileName}
-                          </div>
-                          <div className="xmb-game-hub-actions">
+                    <div className="xmb-export-browser-section">
+                      <div className="xmb-game-hub-section-title">Folders</div>
+                      <div className="xmb-export-browser-directory-list">
+                        {gameHubExportBrowser?.parentPath && (
+                          <button
+                            type="button"
+                            className="xmb-export-browser-directory xmb-export-browser-directory--parent"
+                            onClick={() => { void handleGameHubExportNavigate(gameHubExportBrowser.parentPath!); }}
+                            disabled={gameHubExportBrowserLoading || gameHubActionBusy === "export"}
+                          >
+                            .. Parent Folder
+                          </button>
+                        )}
+                        {gameHubExportBrowserLoading ? (
+                          <div className="xmb-game-hub-capture-empty">Loading folders...</div>
+                        ) : (gameHubExportBrowser?.entries.length ?? 0) === 0 ? (
+                          <div className="xmb-game-hub-capture-empty">No subfolders in this location.</div>
+                        ) : (
+                          gameHubExportBrowser?.entries.map((entry) => (
                             <button
+                              key={entry.path}
                               type="button"
-                              className="xmb-game-hub-action"
-                              onClick={() => { void handleGameHubReveal(); }}
-                              disabled={gameHubActionBusy !== null}
+                              className="xmb-export-browser-directory"
+                              onClick={() => { void handleGameHubExportNavigate(entry.path); }}
+                              disabled={gameHubExportBrowserLoading || gameHubActionBusy === "export"}
                             >
-                              <FolderOpen size={14} />
-                              <span>{gameHubActionBusy === "reveal" ? "Opening..." : "Reveal in Finder"}</span>
+                              {entry.name}
                             </button>
-                            <button
-                              type="button"
-                              className="xmb-game-hub-action"
-                              onClick={() => { void handleGameHubExport(); }}
-                              disabled={gameHubActionBusy !== null}
-                            >
-                              <Share2 size={14} />
-                              <span>{gameHubActionBusy === "export" ? "Exporting..." : "Export / Share"}</span>
-                            </button>
-                            <button
-                              type="button"
-                              className="xmb-game-hub-action xmb-game-hub-action--danger"
-                              onClick={() => { void handleGameHubDelete(); }}
-                              disabled={gameHubActionBusy !== null}
-                            >
-                              <Trash2 size={14} />
-                              <span>{gameHubActionBusy === "delete" ? "Deleting..." : "Delete"}</span>
-                            </button>
-                          </div>
-                          {gameHubActionMessage && <div className="xmb-game-hub-action-message">{gameHubActionMessage}</div>}
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="xmb-game-hub-actions-wrap">
+                      <div className="xmb-game-hub-actions-header">
+                        Exporting to: {gameHubExportBrowser?.currentPath ?? "Loading..."}
+                      </div>
+                      <div className="xmb-game-hub-actions">
+                        <button
+                          type="button"
+                          className="xmb-game-hub-action"
+                          onClick={() => { void handleGameHubExportSubmit(); }}
+                          disabled={gameHubExportBrowserLoading || gameHubActionBusy === "export" || !gameHubExportBrowser}
+                        >
+                          <Share2 size={14} />
+                          <span>
+                            {gameHubActionBusy === "export"
+                              ? "Exporting..."
+                              : gameHubExportOverwritePending
+                                ? "Overwrite Existing"
+                                : "Export Here"}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className="xmb-game-hub-action"
+                          onClick={() => { closeGameHubExportBrowser(); }}
+                          disabled={gameHubActionBusy === "export"}
+                        >
+                          <FolderOpen size={14} />
+                          <span>Cancel</span>
+                        </button>
+                      </div>
+                      {gameHubActionMessage && <div className="xmb-game-hub-action-message">{gameHubActionMessage}</div>}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="xmb-game-hub-eyebrow">{topCategory === "all" ? "Game Hub" : selectedCategoryLabel}</div>
+                    <div className="xmb-game-hub-title-row">
+                      {favoriteGameIdSet.has(selectedGame.id) && <Star className="xmb-game-hub-favorite" />}
+                      <div className="xmb-game-hub-title">{selectedGame.title}</div>
+                    </div>
+                    <p className="xmb-game-hub-description">{selectedGameDescription}</p>
+                    <div className="xmb-game-meta xmb-game-hub-meta">
+                      {selectedGameSessionState && <span className="xmb-game-meta-chip xmb-game-meta-chip--session">{selectedGameSessionState}</span>}
+                    </div>
+
+                    {gameHubSummary && (
+                      <div className="xmb-game-hub-snapshot">
+                        <div className="xmb-game-hub-section-title">Session Snapshot</div>
+                        <div className="xmb-game-meta xmb-game-hub-meta">
+                          {gameHubSnapshotChips.map((chip, index) => (
+                            <span key={`${index}-${chip}`} className="xmb-game-meta-chip">
+                              {chip}
+                            </span>
+                          ))}
                         </div>
+                        {gameHubSnapshotCaption && <div className="xmb-game-hub-snapshot-caption">{gameHubSnapshotCaption}</div>}
+                      </div>
+                    )}
+
+                    <div className="xmb-game-hub-captures">
+                      {gameHubMediaLoading ? (
+                        <div className="xmb-game-hub-capture-empty">Scanning recent captures...</div>
+                      ) : gameHubMedia.length === 0 ? (
+                        <div className="xmb-game-hub-capture-empty">No recent captures.</div>
+                      ) : (
+                        <>
+                          <div className="xmb-game-hub-section-title">Recent Captures</div>
+                          <div className="xmb-game-hub-capture-grid">
+                            {gameHubMedia.map((item, index) => {
+                            const isActiveMoment = selectedGameHubMedia?.id === item.id;
+                            const thumb = mediaThumbById[item.id] ?? item.thumbnailDataUrl ?? item.dataUrl;
+                            const captureLabel = item.kind === "video"
+                              ? `${Math.max(1, Math.round((item.durationMs ?? 0) / 1000))}s Clip`
+                              : "Screenshot";
+                            const captureStats = [
+                              item.sessionSnapshot?.resolution,
+                              formatMediaBitrate(item.sessionSnapshot?.bitrateKbps),
+                              typeof item.sessionSnapshot?.rttMs === "number" && Number.isFinite(item.sessionSnapshot.rttMs)
+                                ? `${Math.round(item.sessionSnapshot.rttMs)} ms`
+                                : null,
+                            ].filter((value): value is string => Boolean(value));
+
+                            return (
+                              <button
+                                key={item.id}
+                                type="button"
+                                className={`xmb-game-hub-capture ${isActiveMoment ? "active" : ""}`}
+                                data-hub-media-index={index}
+                                onClick={() => {
+                                  setSelectedGameHubMediaIndex(gameHubMedia.findIndex((media) => media.id === item.id));
+                                  setGameHubActionMessage(null);
+                                }}
+                              >
+                                {thumb && <img src={thumb} alt={item.fileName} className="xmb-game-hub-capture-image" />}
+                                <div className="xmb-game-hub-capture-meta">
+                                  <div className="xmb-game-hub-capture-name">{captureLabel}</div>
+                                  {captureStats.length > 0 && <div className="xmb-game-hub-capture-stats">{captureStats.join(" • ")}</div>}
+                                  <div className="xmb-game-hub-capture-date">{new Date(item.createdAtMs).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</div>
+                                </div>
+                              </button>
+                            );
+                          })}
+                          </div>
+
+                          {selectedGameHubMedia && (
+                            <div className="xmb-game-hub-actions-wrap">
+                              <div className="xmb-game-hub-actions-header">
+                                Selected Moment: {selectedGameHubMedia.gameTitle || selectedGameHubMedia.fileName}
+                              </div>
+                              <div className="xmb-game-hub-actions">
+                                <button
+                                  type="button"
+                                  className="xmb-game-hub-action"
+                                  onClick={() => { void handleGameHubReveal(); }}
+                                  disabled={gameHubActionBusy !== null}
+                                >
+                                  <FolderOpen size={14} />
+                                  <span>{gameHubActionBusy === "reveal" ? "Opening..." : "Reveal in Finder"}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="xmb-game-hub-action"
+                                  onClick={() => { void handleGameHubExport(); }}
+                                  disabled={gameHubActionBusy !== null}
+                                >
+                                  <Share2 size={14} />
+                                  <span>Browse Export Folder</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="xmb-game-hub-action xmb-game-hub-action--danger"
+                                  onClick={() => { void handleGameHubDelete(); }}
+                                  disabled={gameHubActionBusy !== null}
+                                >
+                                  <Trash2 size={14} />
+                                  <span>{gameHubActionBusy === "delete" ? "Deleting..." : "Delete"}</span>
+                                </button>
+                              </div>
+                              {gameHubActionMessage && <div className="xmb-game-hub-action-message">{gameHubActionMessage}</div>}
+                            </div>
+                          )}
+                        </>
                       )}
-                    </>
-                  )}
-                </div>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -1739,11 +1961,13 @@ export function ControllerLibraryPage({
           </>
         ) : (
           <>
-            <div className="xmb-btn-hint">{renderFaceButton("primary", "xmb-btn-icon", 24)} <span>{currentStreamingGame && selectedGame && currentStreamingGame.id !== selectedGame.id ? "Switch" : "Play"}</span></div>
+            <div className="xmb-btn-hint">{renderFaceButton("primary", "xmb-btn-icon", 24)} <span>{showGameHub && isGameHubExpanded ? "Select" : currentStreamingGame && selectedGame && currentStreamingGame.id !== selectedGame.id ? "Switch" : "Play"}</span></div>
             {showGameHub ? (
               <>
-                <div className="xmb-btn-hint">{renderFaceButton("secondary", "xmb-btn-icon", 24)} <span>{isGameHubExpanded ? "Close Hub" : "Toggle Hub"}</span></div>
-                <div className="xmb-btn-hint">{renderFaceButton("tertiary", "xmb-btn-icon", 24)} <span>{isGameHubExpanded && selectedGameHubMedia ? "Delete Moment" : "Favorite"}</span></div>
+                <div className="xmb-btn-hint">{renderFaceButton("secondary", "xmb-btn-icon", 24)} <span>{isGameHubExportBrowserOpen ? "Close Browser" : isGameHubExpanded ? "Close Hub" : "Toggle Hub"}</span></div>
+                {!isGameHubExportBrowserOpen && (
+                  <div className="xmb-btn-hint">{renderFaceButton("tertiary", "xmb-btn-icon", 24)} <span>{isGameHubExpanded && selectedGameHubMedia ? "Delete Moment" : "Favorite"}</span></div>
+                )}
               </>
             ) : selectedGame?.variants.length && selectedGame.variants.length > 1 ? (
               <div className="xmb-btn-hint">{renderFaceButton("secondary", "xmb-btn-icon", 24)} <span>Variant</span></div>

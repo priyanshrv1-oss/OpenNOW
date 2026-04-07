@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, session } from "electron";
 import { fileURLToPath } from "node:url";
-import { dirname, join, resolve, relative } from "node:path";
+import { dirname, isAbsolute, join, resolve, relative } from "node:path";
 import { existsSync, readFileSync, createWriteStream } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, rename, stat, unlink, writeFile, realpath } from "node:fs/promises";
 import * as net from "node:net";
@@ -57,6 +57,9 @@ import type {
   RecordingAbortRequest,
   RecordingDeleteRequest,
   MediaListingResult,
+  MediaExportBrowserRequest,
+  MediaExportBrowserResult,
+  MediaExportBrowserLocation,
   MediaExportRequest,
   MediaExportResult,
   MediaSessionSnapshot,
@@ -246,6 +249,30 @@ function normalizeOptionalString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function sanitizeMediaExportFileName(value: string | undefined): string {
+  const raw = normalizeOptionalString(value) ?? "OpenNOW-media";
+  const sanitized = raw
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/[. ]+$/g, "")
+    .trim();
+
+  return sanitized.length > 0 ? sanitized.slice(0, 160) : "OpenNOW-media";
+}
+
+function getMediaStorageRoot(): string {
+  return resolve(join(app.getPath("pictures"), "OpenNOW"));
+}
+
+async function isPathWithinDirectory(candidatePath: string, directoryPath: string): Promise<boolean> {
+  const resolvedDirectory = resolve(directoryPath);
+  const resolvedCandidate = resolve(candidatePath);
+  const directoryReal = await realpath(resolvedDirectory).catch(() => resolvedDirectory);
+  const candidateReal = await realpath(resolvedCandidate).catch(() => resolvedCandidate);
+  const rel = relative(directoryReal, candidateReal);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
 function normalizeOptionalNumber(value: unknown): number | undefined {
@@ -459,7 +486,41 @@ async function exportMedia(input: MediaExportRequest): Promise<MediaExportResult
     throw new Error("Media file not found");
   }
 
-  const defaultName = normalizeOptionalString(input.fileName) ?? sourcePath.split(/[/\\]/).pop() ?? "OpenNOW-media";
+  if (!(await isPathWithinDirectory(sourcePath, getMediaStorageRoot()))) {
+    throw new Error("Media file not found");
+  }
+
+  const defaultName = sanitizeMediaExportFileName(
+    normalizeOptionalString(input.fileName) ?? sourcePath.split(/[/\\]/).pop() ?? "OpenNOW-media",
+  );
+
+  const explicitDestinationDirectory = normalizeOptionalString(input.destinationDirectoryPath);
+  if (explicitDestinationDirectory) {
+    const destinationDirectoryPath = resolve(explicitDestinationDirectory);
+    const destinationStats = await stat(destinationDirectoryPath);
+    if (!destinationStats.isDirectory()) {
+      throw new Error("Export directory not found");
+    }
+
+    const targetPath = join(destinationDirectoryPath, defaultName);
+    if (targetPath === sourcePath) {
+      return { saved: false, filePath: targetPath, alreadyExists: true };
+    }
+
+    const existingTarget = await stat(targetPath).catch(() => null);
+    if (existingTarget) {
+      if (!existingTarget.isFile()) {
+        throw new Error("Export target is not a file");
+      }
+      if (!input.overwrite) {
+        return { saved: false, filePath: targetPath, alreadyExists: true };
+      }
+    }
+
+    await copyFile(sourcePath, targetPath);
+    return { saved: true, filePath: targetPath };
+  }
+
   const saveDialogOptions = {
     title: "Export Media",
     defaultPath: join(app.getPath("downloads"), defaultName),
@@ -476,6 +537,63 @@ async function exportMedia(input: MediaExportRequest): Promise<MediaExportResult
 
   await copyFile(sourcePath, target.filePath);
   return { saved: true, filePath: target.filePath };
+}
+
+function getMediaExportQuickLocations(): MediaExportBrowserLocation[] {
+  const candidates: Array<{ id: string; label: string; path: string }> = [
+    { id: "downloads", label: "Downloads", path: app.getPath("downloads") },
+    { id: "desktop", label: "Desktop", path: app.getPath("desktop") },
+    { id: "documents", label: "Documents", path: app.getPath("documents") },
+    { id: "pictures", label: "Pictures", path: app.getPath("pictures") },
+    { id: "videos", label: "Videos", path: app.getPath("videos") },
+    { id: "home", label: "Home", path: app.getPath("home") },
+  ];
+
+  const seen = new Set<string>();
+  return candidates.reduce<MediaExportBrowserLocation[]>((acc, candidate) => {
+    const normalizedPath = normalizeOptionalString(candidate.path);
+    if (!normalizedPath) {
+      return acc;
+    }
+
+    const resolvedPath = resolve(normalizedPath);
+    if (seen.has(resolvedPath)) {
+      return acc;
+    }
+
+    seen.add(resolvedPath);
+    acc.push({ ...candidate, path: resolvedPath });
+    return acc;
+  }, []);
+}
+
+async function browseMediaExportLocations(
+  input: MediaExportBrowserRequest = {},
+): Promise<MediaExportBrowserResult> {
+  const quickLocations = getMediaExportQuickLocations();
+  const fallbackPath = quickLocations[0]?.path ?? resolve(app.getPath("home"));
+  const requestedPath = normalizeOptionalString(input.directoryPath);
+  const currentPath = resolve(requestedPath ?? fallbackPath);
+  const currentStats = await stat(currentPath);
+  if (!currentStats.isDirectory()) {
+    throw new Error("Export directory not found");
+  }
+
+  const entries = (await readdir(currentPath, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+    .map((entry) => ({
+      name: entry.name,
+      path: join(currentPath, entry.name),
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" }));
+
+  const parentPath = resolve(currentPath, "..");
+  return {
+    currentPath,
+    parentPath: parentPath !== currentPath ? parentPath : undefined,
+    entries,
+    quickLocations,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1253,6 +1371,13 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.MEDIA_EXPORT, async (_event, payload: MediaExportRequest): Promise<MediaExportResult> => {
     return exportMedia(payload);
   });
+
+  ipcMain.handle(
+    IPC_CHANNELS.MEDIA_EXPORT_BROWSE,
+    async (_event, payload: MediaExportBrowserRequest | undefined): Promise<MediaExportBrowserResult> => {
+      return browseMediaExportLocations(payload);
+    },
+  );
 
   ipcMain.handle(IPC_CHANNELS.CACHE_REFRESH_MANUAL, async (): Promise<void> => {
     await refreshScheduler.manualRefresh();

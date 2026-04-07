@@ -434,20 +434,48 @@ export interface OpenNowApi {
   /** Reveal a media file path in the system file manager */
   showMediaInFolder(input: { filePath: string }): Promise<void>;
 
-  /** Export a media file to a user-selected path */
+  /** List available export destination folders for the in-app export browser */
+  browseMediaExportLocations(input?: MediaExportBrowserRequest): Promise<MediaExportBrowserResult>;
+
+  /** Export a media file to a destination selected in-app */
   exportMedia(input: MediaExportRequest): Promise<MediaExportResult>;
 
   deleteCache(): Promise<void>;
 }
 
+export interface MediaExportBrowserRequest {
+  directoryPath?: string;
+}
+
+export interface MediaExportBrowserLocation {
+  id: string;
+  label: string;
+  path: string;
+}
+
+export interface MediaExportBrowserEntry {
+  name: string;
+  path: string;
+}
+
+export interface MediaExportBrowserResult {
+  currentPath: string;
+  parentPath?: string;
+  entries: MediaExportBrowserEntry[];
+  quickLocations: MediaExportBrowserLocation[];
+}
+
 export interface MediaExportRequest {
   filePath: string;
   fileName?: string;
+  destinationDirectoryPath?: string;
+  overwrite?: boolean;
 }
 
 export interface MediaExportResult {
   saved: boolean;
   filePath?: string;
+  alreadyExists?: boolean;
 }
 
 export interface ScreenshotSaveRequest {

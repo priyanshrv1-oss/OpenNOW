@@ -31,6 +31,8 @@ import type {
   RecordingEntry,
   RecordingDeleteRequest,
   MediaListingResult,
+  MediaExportBrowserRequest,
+  MediaExportBrowserResult,
   MediaExportRequest,
   MediaExportResult,
 } from "@shared/gfn";
@@ -121,6 +123,8 @@ const api: OpenNowApi = {
   getMediaThumbnail: (input: { filePath: string }) => ipcRenderer.invoke(IPC_CHANNELS.MEDIA_THUMBNAIL, input),
   showMediaInFolder: (input: { filePath: string }): Promise<void> =>
     ipcRenderer.invoke(IPC_CHANNELS.MEDIA_SHOW_IN_FOLDER, input),
+  browseMediaExportLocations: (input: MediaExportBrowserRequest = {}): Promise<MediaExportBrowserResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEDIA_EXPORT_BROWSE, input),
   exportMedia: (input: MediaExportRequest): Promise<MediaExportResult> =>
     ipcRenderer.invoke(IPC_CHANNELS.MEDIA_EXPORT, input),
   deleteCache: (): Promise<void> =>
