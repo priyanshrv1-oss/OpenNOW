@@ -4983,6 +4983,18 @@ button.game-card-store-chip.active:hover {
   gap: 10px;
 }
 
+.sv-shot-modal-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-border);
+  background: #050607;
+  color: var(--ink-soft);
+  font-size: 0.95rem;
+}
+
 .sv-shot-modal-head {
   display: flex;
   align-items: center;
@@ -5020,6 +5032,14 @@ button.game-card-store-chip.active:hover {
   width: 100%;
   max-height: calc(100vh - 180px);
   object-fit: contain;
+  border-radius: 10px;
+  border: 1px solid var(--panel-border);
+  background: #050607;
+}
+
+.sv-shot-modal-video {
+  width: 100%;
+  max-height: calc(100vh - 180px);
   border-radius: 10px;
   border: 1px solid var(--panel-border);
   background: #050607;
@@ -5520,6 +5540,15 @@ button.game-card-store-chip.active:hover {
   gap: 14px;
 }
 
+.xmb-media-detail {
+  width: auto;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 14px;
+}
+
 .xmb-current-poster {
   width: min(100%, 250px);
   border-radius: 20px;
@@ -5534,6 +5563,20 @@ button.game-card-store-chip.active:hover {
   width: 100%;
   aspect-ratio: 9 / 16;
   object-fit: cover;
+}
+
+.xmb-media-detail-preview-empty {
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(225, 255, 234, 0.6);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04));
 }
 
 .xmb-current-info,

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
 import type { GameInfo, MediaExportBrowserResult, MediaListingEntry, MediaSessionSummary, Settings } from "@shared/gfn";
-import { Star, Clock, Calendar, Repeat2, FolderOpen, Share2, Trash2 } from "lucide-react";
+import { Star, Clock, Calendar, Repeat2, FolderOpen, Share2, Trash2, X } from "lucide-react";
 import { ButtonA, ButtonB, ButtonX, ButtonY, ButtonPSCross, ButtonPSCircle, ButtonPSSquare, ButtonPSTriangle } from "./ControllerButtons";
 import { getStoreDisplayName } from "./GameCard";
 import { type PlaytimeStore, formatPlaytime, formatLastPlayed } from "../utils/usePlaytime";
@@ -47,6 +47,7 @@ interface ControllerLibraryPageProps {
   onSettingChange?: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
   onExitControllerMode?: () => void;
   sessionElapsedSeconds?: number;
+  onOpenMediaAsset?: (asset: MediaListingEntry) => void;
 }
 
 type Direction = "up" | "down" | "left" | "right";
@@ -59,6 +60,7 @@ type GameHubMediaItem = MediaListingEntry & { kind: "video" | "screenshot" };
 const CATEGORY_STEP_PX = 160;
 const CATEGORY_ACTIVE_HALF_WIDTH_PX = 60;
 const GAME_ACTIVE_CENTER_OFFSET_X_PX = 320;
+const MEDIA_VIDEO_SCRUB_SECONDS = 10;
 
 function sanitizeGenreName(raw: string): string {
   return raw
@@ -113,6 +115,15 @@ function formatSessionElapsedCompact(totalSeconds: number | undefined): string |
   return `${safe}s`;
 }
 
+function toLocalFileUrl(filePath: string | undefined): string | null {
+  if (!filePath) return null;
+  const normalized = filePath.replace(/\\/g, "/");
+  if (!normalized) return null;
+  return normalized.startsWith("/")
+    ? encodeURI(`file://${normalized}`)
+    : encodeURI(`file:///${normalized}`);
+}
+
 
 export function ControllerLibraryPage({
   games,
@@ -143,6 +154,7 @@ export function ControllerLibraryPage({
   onSettingChange,
   onExitControllerMode,
   sessionElapsedSeconds = 0,
+  onOpenMediaAsset,
 }: ControllerLibraryPageProps): JSX.Element {
   const [isEntering, setIsEntering] = useState(true);
   const initialCategoryIndex = (() => {
@@ -161,6 +173,9 @@ export function ControllerLibraryPage({
   const [metaMaxWidth, setMetaMaxWidth] = useState<number | null>(null);
   const posterObserverRef = useRef<ResizeObserver | null>(null);
   const gameHubExportBrowseRequestIdRef = useRef(0);
+  const mediaExportBrowseRequestIdRef = useRef(0);
+  const mediaViewerRequestIdRef = useRef(0);
+  const mediaViewerVideoRef = useRef<HTMLVideoElement | null>(null);
   const attachPosterRef = (el: HTMLImageElement | null) => {
     if (posterObserverRef.current) {
       try { posterObserverRef.current.disconnect(); } catch {}
@@ -194,6 +209,16 @@ export function ControllerLibraryPage({
   const [mediaVideos, setMediaVideos] = useState<MediaListingEntry[]>([]);
   const [mediaScreenshots, setMediaScreenshots] = useState<MediaListingEntry[]>([]);
   const [mediaThumbById, setMediaThumbById] = useState<Record<string, string>>({});
+  const [mediaActionBusy, setMediaActionBusy] = useState<"reveal" | "export" | "delete" | null>(null);
+  const [mediaActionMessage, setMediaActionMessage] = useState<string | null>(null);
+  const [isMediaExportBrowserOpen, setIsMediaExportBrowserOpen] = useState(false);
+  const [mediaViewerAsset, setMediaViewerAsset] = useState<MediaListingEntry | null>(null);
+  const [mediaViewerSource, setMediaViewerSource] = useState<string | null>(null);
+  const [mediaViewerLoading, setMediaViewerLoading] = useState(false);
+  const [mediaExportBrowser, setMediaExportBrowser] = useState<MediaExportBrowserResult | null>(null);
+  const [mediaExportBrowserLoading, setMediaExportBrowserLoading] = useState(false);
+  const [mediaExportOverwritePending, setMediaExportOverwritePending] = useState(false);
+  const [lastMediaExportDirectoryPath, setLastMediaExportDirectoryPath] = useState<string | null>(null);
   const [gameHubMedia, setGameHubMedia] = useState<GameHubMediaItem[]>([]);
   const [gameHubSummary, setGameHubSummary] = useState<MediaSessionSummary | null>(null);
   const [gameHubMediaLoading, setGameHubMediaLoading] = useState(false);
@@ -496,6 +521,23 @@ export function ControllerLibraryPage({
   }, [categorizedGames, selectedGameId]);
 
   const selectedGame = useMemo(() => categorizedGames[selectedIndex] ?? null, [categorizedGames, selectedIndex]);
+  const selectedMediaAsset = useMemo(() => {
+    if (topCategory !== "media" || mediaSubcategory === "root") return null;
+    return mediaAssetItems[selectedMediaIndex] ?? null;
+  }, [topCategory, mediaSubcategory, mediaAssetItems, selectedMediaIndex]);
+  const selectedMediaThumb = useMemo(() => {
+    if (!selectedMediaAsset) return null;
+    return mediaThumbById[selectedMediaAsset.id] ?? selectedMediaAsset.thumbnailDataUrl ?? selectedMediaAsset.dataUrl ?? null;
+  }, [mediaThumbById, selectedMediaAsset]);
+  const isMediaViewerVideo = Boolean(mediaViewerAsset && (mediaViewerAsset.durationMs ?? 0) > 0);
+  const scrubMediaViewerVideo = useCallback((direction: "prev" | "next") => {
+    const video = mediaViewerVideoRef.current;
+    if (!video || !isMediaViewerVideo) return;
+    const delta = direction === "next" ? MEDIA_VIDEO_SCRUB_SECONDS : -MEDIA_VIDEO_SCRUB_SECONDS;
+    const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : Number.POSITIVE_INFINITY;
+    const nextTime = Math.min(Math.max(0, video.currentTime + delta), duration);
+    video.currentTime = nextTime;
+  }, [isMediaViewerVideo]);
 
   const selectedVariantId = useMemo(() => {
     if (!selectedGame) return "";
@@ -506,7 +548,8 @@ export function ControllerLibraryPage({
   const isGameHubCategory = topCategory !== "settings" && topCategory !== "current" && topCategory !== "media";
   const showGameHub = isGameHubCategory && Boolean(selectedGame);
   const showCurrentDetail = topCategory === "current" && Boolean(currentStreamingGame);
-  const detailVisible = showCurrentDetail || showGameHub;
+  const showMediaDetail = topCategory === "media" && mediaSubcategory !== "root" && Boolean(selectedMediaAsset);
+  const detailVisible = showCurrentDetail || showGameHub || showMediaDetail;
 
   const selectedCategoryLabel = useMemo(() => getCategoryLabel(topCategory, currentStreamingGame?.title).label, [topCategory, currentStreamingGame?.title]);
   const selectedGameDescription = useMemo(() => {
@@ -593,6 +636,31 @@ export function ControllerLibraryPage({
 
     return parts.join(" • ");
   }, [gameHubSummary]);
+  const selectedMediaDetailChips = useMemo(() => {
+    if (!selectedMediaAsset) return [] as string[];
+
+    const durationMs = selectedMediaAsset.durationMs ?? 0;
+    return [
+      durationMs > 0 ? `${Math.max(1, Math.round(durationMs / 1000))}s Clip` : "Screenshot",
+      new Date(selectedMediaAsset.createdAtMs).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }),
+      selectedMediaAsset.sessionSnapshot?.resolution,
+      formatMediaBitrate(selectedMediaAsset.sessionSnapshot?.bitrateKbps),
+      typeof selectedMediaAsset.sessionSnapshot?.rttMs === "number" && Number.isFinite(selectedMediaAsset.sessionSnapshot.rttMs)
+        ? `${Math.round(selectedMediaAsset.sessionSnapshot.rttMs)} ms`
+        : null,
+    ].filter((value): value is string => Boolean(value));
+  }, [selectedMediaAsset]);
+  const selectedMediaDetailCaption = useMemo(() => {
+    if (!selectedMediaAsset?.sessionSnapshot) return null;
+
+    return [
+      selectedMediaAsset.sessionSnapshot.codec,
+      typeof selectedMediaAsset.sessionSnapshot.packetLossPercent === "number" && Number.isFinite(selectedMediaAsset.sessionSnapshot.packetLossPercent)
+        ? `${selectedMediaAsset.sessionSnapshot.packetLossPercent.toFixed(1)}% loss`
+        : null,
+      selectedMediaAsset.sessionSnapshot.serverRegion,
+    ].filter((value): value is string => Boolean(value)).join(" • ") || null;
+  }, [selectedMediaAsset]);
 
   const loadGameHubMedia = useCallback(async (gameTitle: string, cancelled?: () => boolean) => {
     const listing = await window.openNow.listMediaByGame({ gameTitle });
@@ -760,6 +828,172 @@ export function ControllerLibraryPage({
     }
   }, [loadGameHubMedia, playUiSound, selectedGame?.title, selectedGameHubMedia]);
 
+  const closeMediaExportBrowser = useCallback((clearMessage = true) => {
+    mediaExportBrowseRequestIdRef.current += 1;
+    setIsMediaExportBrowserOpen(false);
+    setMediaExportBrowser(null);
+    setMediaExportBrowserLoading(false);
+    setMediaExportOverwritePending(false);
+    if (clearMessage) {
+      setMediaActionMessage(null);
+    }
+  }, []);
+
+  const closeMediaViewer = useCallback(() => {
+    mediaViewerRequestIdRef.current += 1;
+    setMediaViewerAsset(null);
+    setMediaViewerSource(null);
+    setMediaViewerLoading(false);
+  }, []);
+
+  const loadMediaExportBrowser = useCallback(async (directoryPath?: string) => {
+    if (typeof window.openNow?.browseMediaExportLocations !== "function") {
+      throw new Error("Export browser unavailable");
+    }
+
+    const requestId = mediaExportBrowseRequestIdRef.current + 1;
+    mediaExportBrowseRequestIdRef.current = requestId;
+    setMediaExportBrowserLoading(true);
+    setMediaActionMessage(null);
+    setMediaExportOverwritePending(false);
+
+    try {
+      const result = await window.openNow.browseMediaExportLocations(directoryPath ? { directoryPath } : {});
+      if (mediaExportBrowseRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      setMediaExportBrowser(result);
+      setLastMediaExportDirectoryPath(result.currentPath);
+    } finally {
+      if (mediaExportBrowseRequestIdRef.current === requestId) {
+        setMediaExportBrowserLoading(false);
+      }
+    }
+  }, []);
+
+  const handleMediaOpen = useCallback(async (asset?: MediaListingEntry | null) => {
+    const targetAsset = asset ?? selectedMediaAsset;
+    if (!targetAsset) return;
+    const requestId = mediaViewerRequestIdRef.current + 1;
+    mediaViewerRequestIdRef.current = requestId;
+    setMediaActionMessage(null);
+    setMediaViewerAsset(targetAsset);
+    setMediaViewerSource(targetAsset.dataUrl ?? null);
+    setMediaViewerLoading(!targetAsset.dataUrl);
+    playUiSound("confirm");
+
+    if (targetAsset.dataUrl) {
+      return;
+    }
+
+    try {
+      const resolvedSource = typeof window.openNow?.getMediaDataUrl === "function"
+        ? await window.openNow.getMediaDataUrl({ filePath: targetAsset.filePath })
+        : toLocalFileUrl(targetAsset.filePath);
+
+      if (mediaViewerRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      if (!resolvedSource) {
+        closeMediaViewer();
+        setMediaActionMessage("Unable to open media.");
+        return;
+      }
+
+      setMediaViewerSource(resolvedSource);
+    } catch {
+      if (mediaViewerRequestIdRef.current === requestId) {
+        closeMediaViewer();
+        setMediaActionMessage("Unable to open media.");
+      }
+    } finally {
+      if (mediaViewerRequestIdRef.current === requestId) {
+        setMediaViewerLoading(false);
+      }
+    }
+  }, [closeMediaViewer, playUiSound, selectedMediaAsset]);
+
+  const handleMediaExport = useCallback(async () => {
+    if (!selectedMediaAsset) return;
+    setIsMediaExportBrowserOpen(true);
+    setMediaExportBrowser(null);
+    try {
+      await loadMediaExportBrowser(lastMediaExportDirectoryPath ?? undefined);
+      playUiSound("confirm");
+    } catch {
+      closeMediaExportBrowser(false);
+      setMediaActionMessage("Unable to browse export folders.");
+    }
+  }, [closeMediaExportBrowser, lastMediaExportDirectoryPath, loadMediaExportBrowser, playUiSound, selectedMediaAsset]);
+
+  const handleMediaExportNavigate = useCallback(async (directoryPath: string) => {
+    try {
+      await loadMediaExportBrowser(directoryPath);
+      playUiSound("move");
+    } catch {
+      setMediaActionMessage("Unable to open that folder.");
+    }
+  }, [loadMediaExportBrowser, playUiSound]);
+
+  const handleMediaExportSubmit = useCallback(async () => {
+    if (!selectedMediaAsset || !mediaExportBrowser || typeof window.openNow?.exportMedia !== "function") return;
+
+    setMediaActionBusy("export");
+    setMediaActionMessage(null);
+    try {
+      const result = await window.openNow.exportMedia({
+        filePath: selectedMediaAsset.filePath,
+        fileName: selectedMediaAsset.fileName,
+        destinationDirectoryPath: mediaExportBrowser.currentPath,
+        overwrite: mediaExportOverwritePending,
+      });
+
+      if (result.saved) {
+        setLastMediaExportDirectoryPath(mediaExportBrowser.currentPath);
+        closeMediaExportBrowser();
+        playUiSound("confirm");
+        return;
+      }
+
+      if (result.alreadyExists) {
+        setMediaExportOverwritePending(true);
+        setMediaActionMessage("A file with that name already exists here.");
+      }
+    } catch {
+      setMediaActionMessage("Unable to export media.");
+    } finally {
+      setMediaActionBusy(null);
+    }
+  }, [closeMediaExportBrowser, mediaExportBrowser, mediaExportOverwritePending, playUiSound, selectedMediaAsset]);
+
+  const handleMediaDelete = useCallback(async () => {
+    if (!selectedMediaAsset) return;
+    setMediaActionBusy("delete");
+    setMediaActionMessage(null);
+    try {
+      if (mediaSubcategory === "Screenshots") {
+        await window.openNow.deleteScreenshot({ id: selectedMediaAsset.id });
+        setMediaScreenshots((prev) => prev.filter((item) => item.id !== selectedMediaAsset.id));
+      } else {
+        await window.openNow.deleteRecording({ id: selectedMediaAsset.id });
+        setMediaVideos((prev) => prev.filter((item) => item.id !== selectedMediaAsset.id));
+      }
+      setMediaThumbById((prev) => {
+        const next = { ...prev };
+        delete next[selectedMediaAsset.id];
+        return next;
+      });
+      closeMediaExportBrowser();
+      playUiSound("confirm");
+    } catch {
+      setMediaActionMessage("Unable to delete media.");
+    } finally {
+      setMediaActionBusy(null);
+    }
+  }, [closeMediaExportBrowser, mediaSubcategory, playUiSound, selectedMediaAsset]);
+
   useEffect(() => {
     if (!showGameHub || !selectedGame?.title || typeof window.openNow?.listMediaByGame !== "function") {
       setGameHubMedia([]);
@@ -806,6 +1040,11 @@ export function ControllerLibraryPage({
   }, [gameHubMedia.length]);
 
   useEffect(() => {
+    if (topCategory !== "media" || mediaSubcategory === "root") return;
+    setSelectedMediaIndex((prev) => Math.min(prev, Math.max(0, mediaAssetItems.length - 1)));
+  }, [mediaAssetItems.length, mediaSubcategory, topCategory]);
+
+  useEffect(() => {
     if (!showGameHub || !isGameHubExpanded) {
       document.querySelectorAll<HTMLElement>(".xmb-game-hub .controller-focus").forEach((node) => {
         node.classList.remove("controller-focus");
@@ -826,6 +1065,29 @@ export function ControllerLibraryPage({
   }, [focusGameHubButton, getGameHubButtons, isGameHubExpanded, selectedGameHubMediaIndex, showGameHub, syncGameHubSelectionFromButton, gameHubMedia.length]);
 
   useEffect(() => {
+    if (!showMediaDetail || !isMediaExportBrowserOpen) {
+      document.querySelectorAll<HTMLElement>(".xmb-media-detail .controller-focus").forEach((node) => {
+        node.classList.remove("controller-focus");
+      });
+      return;
+    }
+
+    const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>(".xmb-media-detail .xmb-export-browser button:not([disabled])"))
+      .filter((button) => button.offsetParent !== null);
+    if (buttons.length === 0) return;
+
+    const active = document.activeElement instanceof HTMLButtonElement && buttons.includes(document.activeElement)
+      ? document.activeElement
+      : null;
+    const nextButton = active ?? buttons[0];
+    document.querySelectorAll<HTMLElement>(".controller-focus").forEach((node) => {
+      node.classList.remove("controller-focus");
+    });
+    nextButton.classList.add("controller-focus");
+    nextButton.focus({ preventScroll: true });
+  }, [showMediaDetail, isMediaExportBrowserOpen, mediaExportBrowserLoading, mediaExportBrowser?.currentPath, mediaExportBrowser?.entries.length]);
+
+  useEffect(() => {
     setSelectedGameHubMediaIndex(0);
     setGameHubActionMessage(null);
     setIsGameHubExpanded(false);
@@ -834,6 +1096,22 @@ export function ControllerLibraryPage({
     setGameHubExportBrowserLoading(false);
     setGameHubExportOverwritePending(false);
   }, [selectedGame?.id]);
+
+  useEffect(() => {
+    if (topCategory === "media" && mediaSubcategory !== "root") return;
+    mediaExportBrowseRequestIdRef.current += 1;
+    setIsMediaExportBrowserOpen(false);
+    closeMediaViewer();
+    setMediaExportBrowser(null);
+    setMediaExportBrowserLoading(false);
+    setMediaExportOverwritePending(false);
+    setMediaActionMessage(null);
+  }, [closeMediaViewer, mediaSubcategory, topCategory]);
+
+  useEffect(() => {
+    setMediaActionMessage(null);
+    setMediaExportOverwritePending(false);
+  }, [selectedMediaAsset?.id]);
 
   useEffect(() => {
     if (isGameHubExpanded) return;
@@ -916,6 +1194,38 @@ export function ControllerLibraryPage({
     return true;
   }
 
+  function moveMediaExportFocus(direction: Direction): boolean {
+    const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>(".xmb-media-detail .xmb-export-browser button:not([disabled])"))
+      .filter((button) => button.offsetParent !== null);
+    if (buttons.length === 0) return false;
+
+    const active = document.activeElement instanceof HTMLButtonElement && buttons.includes(document.activeElement)
+      ? document.activeElement
+      : null;
+    if (!active) {
+      playUiSound("move");
+      document.querySelectorAll<HTMLElement>(".controller-focus").forEach((node) => {
+        node.classList.remove("controller-focus");
+      });
+      buttons[0].classList.add("controller-focus");
+      buttons[0].focus({ preventScroll: true });
+      return true;
+    }
+
+    const currentIndex = buttons.indexOf(active);
+    const step = direction === "up" || direction === "left" ? -1 : 1;
+    const nextButton = buttons[(currentIndex + step + buttons.length) % buttons.length];
+    if (nextButton === active) return true;
+
+    playUiSound("move");
+    document.querySelectorAll<HTMLElement>(".controller-focus").forEach((node) => {
+      node.classList.remove("controller-focus");
+    });
+    nextButton.classList.add("controller-focus");
+    nextButton.focus({ preventScroll: true });
+    return true;
+  }
+
   useEffect(() => {
     const applyDirection = (direction: Direction): void => {
       // When editing the bandwidth slider, use left/right to adjust value
@@ -937,6 +1247,13 @@ export function ControllerLibraryPage({
       }
       if (showGameHub && isGameHubExpanded) {
         moveGameHubFocus(direction);
+        return;
+      }
+      if (showMediaDetail && isMediaExportBrowserOpen) {
+        moveMediaExportFocus(direction);
+        return;
+      }
+      if (mediaViewerAsset) {
         return;
       }
       if (isLoading && topCategory !== "settings" && topCategory !== "current") return;
@@ -1040,6 +1357,20 @@ export function ControllerLibraryPage({
         }
         return;
       }
+      if (showMediaDetail && isMediaExportBrowserOpen) {
+        const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>(".xmb-media-detail .xmb-export-browser button:not([disabled])"))
+          .filter((button) => button.offsetParent !== null);
+        const activeButton = document.activeElement instanceof HTMLButtonElement && buttons.includes(document.activeElement)
+          ? document.activeElement
+          : buttons[0] ?? null;
+        if (activeButton) {
+          activeButton.click();
+        }
+        return;
+      }
+      if (mediaViewerAsset) {
+        return;
+      }
       if (topCategory === "current") {
         const item = displayItems[selectedSettingIndex];
         if (item?.id === "resume" && currentStreamingGame && onResumeGame) {
@@ -1106,9 +1437,8 @@ export function ControllerLibraryPage({
 
         if (mediaSubcategory !== "root") {
           const selectedMedia = mediaAssetItems[selectedMediaIndex];
-          if (selectedMedia && typeof window.openNow?.showMediaInFolder === "function") {
-            void window.openNow.showMediaInFolder({ filePath: selectedMedia.filePath });
-            playUiSound("confirm");
+          if (selectedMedia) {
+            handleMediaOpen(selectedMedia);
             return;
           }
         }
@@ -1121,6 +1451,20 @@ export function ControllerLibraryPage({
     };
 
     const secondaryActivateHandler = () => {
+      if (topCategory === "media" && mediaSubcategory !== "root") {
+        if (mediaViewerAsset) {
+          closeMediaViewer();
+          playUiSound("move");
+          return;
+        }
+        if (isMediaExportBrowserOpen) {
+          closeMediaExportBrowser();
+          playUiSound("move");
+          return;
+        }
+        void handleMediaExport();
+        return;
+      }
       if (showGameHub && isGameHubExpanded && isGameHubExportBrowserOpen) {
         closeGameHubExportBrowser();
         playUiSound("move");
@@ -1212,6 +1556,15 @@ export function ControllerLibraryPage({
     };
 
     const tertiaryActivateHandler = () => {
+      if (topCategory === "media" && mediaSubcategory !== "root") {
+        if (isMediaExportBrowserOpen) {
+          return;
+        }
+        if (selectedMediaAsset) {
+            void handleMediaDelete();
+          }
+        return;
+      }
       if (showGameHub && isGameHubExpanded && isGameHubExportBrowserOpen) {
         return;
       }
@@ -1240,6 +1593,20 @@ export function ControllerLibraryPage({
         e.preventDefault();
         return;
       }
+      if (topCategory === "media" && mediaSubcategory !== "root") {
+        if (mediaViewerAsset) {
+          closeMediaViewer();
+          playUiSound("move");
+          e.preventDefault();
+          return;
+        }
+        if (isMediaExportBrowserOpen) {
+          closeMediaExportBrowser();
+          playUiSound("move");
+          e.preventDefault();
+          return;
+        }
+      }
       if (showGameHub) {
         if (isGameHubExportBrowserOpen) {
           closeGameHubExportBrowser();
@@ -1262,8 +1629,34 @@ export function ControllerLibraryPage({
       }
     };
 
+    const shoulderHandler = (e: Event) => {
+      if (!mediaViewerAsset || !isMediaViewerVideo) {
+        return;
+      }
+      const direction = (e as CustomEvent<{ direction?: "prev" | "next" }>).detail?.direction;
+      if (!direction) {
+        return;
+      }
+      scrubMediaViewerVideo(direction);
+      playUiSound("move");
+    };
+
     const kbdHandler = (e: KeyboardEvent) => {
       if (e.repeat || e.altKey || e.ctrlKey || e.metaKey || isEditableTarget(e.target)) return;
+      if (mediaViewerAsset && isMediaViewerVideo) {
+        if (e.key === "q" || e.key === "Q" || e.key === "[") {
+          e.preventDefault();
+          scrubMediaViewerVideo("prev");
+          playUiSound("move");
+          return;
+        }
+        if (e.key === "e" || e.key === "E" || e.key === "]") {
+          e.preventDefault();
+          scrubMediaViewerVideo("next");
+          playUiSound("move");
+          return;
+        }
+      }
       if (e.key === "ArrowLeft") {
         e.preventDefault();
         applyDirection("left");
@@ -1331,6 +1724,7 @@ export function ControllerLibraryPage({
     window.addEventListener("opennow:controller-secondary-activate", secondaryActivateHandler);
     window.addEventListener("opennow:controller-tertiary-activate", tertiaryActivateHandler);
     window.addEventListener("opennow:controller-cancel", cancelHandler);
+    window.addEventListener("opennow:controller-shoulder", shoulderHandler as EventListener);
     window.addEventListener("keydown", kbdHandler);
     return () => {
       window.removeEventListener("opennow:controller-direction", handler);
@@ -1339,9 +1733,10 @@ export function ControllerLibraryPage({
       window.removeEventListener("opennow:controller-secondary-activate", secondaryActivateHandler);
       window.removeEventListener("opennow:controller-tertiary-activate", tertiaryActivateHandler);
       window.removeEventListener("opennow:controller-cancel", cancelHandler);
+      window.removeEventListener("opennow:controller-shoulder", shoulderHandler as EventListener);
       window.removeEventListener("keydown", kbdHandler);
     };
-  }, [isLoading, TOP_CATEGORIES.length, categorizedGames, selectedIndex, selectedGame, selectedVariantId, onPlayGame, onSelectGameVariant, onOpenSettings, playUiSound, throttledOnSelectGame, toggleFavoriteForSelected, topCategory, selectedSettingIndex, selectedMediaIndex, displayItems, mediaAssetItems.length, mediaSubcategory, settings, settingsBySubcategory, settingsSubcategory, lastRootSettingIndex, lastRootMediaIndex, onSettingChange, resolutionOptions, fpsOptions, codecOptions, aspectRatioOptions, currentStreamingGame, onResumeGame, onCloseGame, onExitControllerMode, onExitApp, editingBandwidth, showGameHub, isGameHubExpanded, isGameHubExportBrowserOpen, selectedGameHubMedia, handleGameHubReveal, handleGameHubExport, handleGameHubDelete, gameHubMedia.length, selectedGameHubMediaIndex, moveGameHubFocus, closeGameHubExportBrowser]);
+  }, [isLoading, TOP_CATEGORIES.length, categorizedGames, selectedIndex, selectedGame, selectedVariantId, onPlayGame, onSelectGameVariant, onOpenSettings, playUiSound, throttledOnSelectGame, toggleFavoriteForSelected, topCategory, selectedSettingIndex, selectedMediaIndex, displayItems, mediaAssetItems.length, mediaSubcategory, settings, settingsBySubcategory, settingsSubcategory, lastRootSettingIndex, lastRootMediaIndex, onSettingChange, resolutionOptions, fpsOptions, codecOptions, aspectRatioOptions, currentStreamingGame, onResumeGame, onCloseGame, onExitControllerMode, onExitApp, editingBandwidth, showGameHub, showMediaDetail, mediaViewerAsset, isMediaViewerVideo, isGameHubExpanded, isGameHubExportBrowserOpen, isMediaExportBrowserOpen, selectedGameHubMedia, selectedMediaAsset, handleGameHubReveal, handleGameHubExport, handleGameHubDelete, handleMediaOpen, handleMediaExport, handleMediaDelete, gameHubMedia.length, selectedGameHubMediaIndex, moveGameHubFocus, closeGameHubExportBrowser, closeMediaExportBrowser, closeMediaViewer, scrubMediaViewerVideo]);
 
   const renderFaceButton = (kind: "primary" | "secondary" | "tertiary", className: string, size: number): JSX.Element => {
     if (kind === "primary") {
@@ -1597,6 +1992,19 @@ export function ControllerLibraryPage({
                 <div className="xmb-game-meta">
                   <span className="xmb-game-meta-chip">{durationLabel}</span>
                   <span className="xmb-game-meta-chip">{dateLabel}</span>
+                </div>
+                <div className="xmb-game-meta xmb-game-meta--expanded">
+                  <button
+                    type="button"
+                    className="xmb-game-meta-chip xmb-game-meta-chip--action"
+                    onClick={() => {
+                      setSelectedMediaIndex(idx);
+                      setMediaActionMessage(null);
+                      handleMediaOpen(item);
+                    }}
+                  >
+                    Open
+                  </button>
                 </div>
               </div>
             </div>
@@ -1879,7 +2287,172 @@ export function ControllerLibraryPage({
               </div>
             </div>
           )}
+          {showMediaDetail && selectedMediaAsset && (
+            <div className="xmb-media-detail">
+              <div className="xmb-current-poster">
+                {selectedMediaThumb ? (
+                  <img src={selectedMediaThumb} alt={selectedMediaAsset.gameTitle || selectedMediaAsset.fileName} />
+                ) : (
+                  <div className="xmb-media-detail-preview-empty">No Preview</div>
+                )}
+              </div>
+              <div className="xmb-game-hub-panel">
+                {isMediaExportBrowserOpen ? (
+                  <div className="xmb-export-browser">
+                    <div className="xmb-game-hub-eyebrow">Export Media</div>
+                    <div className="xmb-game-hub-title-row">
+                      <div className="xmb-game-hub-title">Choose Destination</div>
+                    </div>
+                    <div className="xmb-export-browser-file">{selectedMediaAsset.fileName}</div>
+                    <div className="xmb-export-browser-path">{mediaExportBrowser?.currentPath ?? "Loading folders..."}</div>
+
+                    <div className="xmb-export-browser-section">
+                      <div className="xmb-game-hub-section-title">Quick Locations</div>
+                      <div className="xmb-export-browser-quick-grid">
+                        {(mediaExportBrowser?.quickLocations ?? []).map((location) => (
+                          <button
+                            key={location.id}
+                            type="button"
+                            className="xmb-export-browser-quick"
+                            onClick={() => { void handleMediaExportNavigate(location.path); }}
+                            disabled={mediaExportBrowserLoading || mediaActionBusy === "export"}
+                          >
+                            {location.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="xmb-export-browser-section">
+                      <div className="xmb-game-hub-section-title">Folders</div>
+                      <div className="xmb-export-browser-directory-list">
+                        {mediaExportBrowser?.parentPath && (
+                          <button
+                            type="button"
+                            className="xmb-export-browser-directory xmb-export-browser-directory--parent"
+                            onClick={() => { void handleMediaExportNavigate(mediaExportBrowser.parentPath!); }}
+                            disabled={mediaExportBrowserLoading || mediaActionBusy === "export"}
+                          >
+                            .. Parent Folder
+                          </button>
+                        )}
+                        {mediaExportBrowserLoading ? (
+                          <div className="xmb-game-hub-capture-empty">Loading folders...</div>
+                        ) : (mediaExportBrowser?.entries.length ?? 0) === 0 ? (
+                          <div className="xmb-game-hub-capture-empty">No subfolders in this location.</div>
+                        ) : (
+                          mediaExportBrowser?.entries.map((entry) => (
+                            <button
+                              key={entry.path}
+                              type="button"
+                              className="xmb-export-browser-directory"
+                              onClick={() => { void handleMediaExportNavigate(entry.path); }}
+                              disabled={mediaExportBrowserLoading || mediaActionBusy === "export"}
+                            >
+                              {entry.name}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="xmb-game-hub-actions-wrap">
+                      <div className="xmb-game-hub-actions-header">Exporting to: {mediaExportBrowser?.currentPath ?? "Loading..."}</div>
+                      <div className="xmb-game-hub-actions">
+                        <button
+                          type="button"
+                          className="xmb-game-hub-action"
+                          onClick={() => { void handleMediaExportSubmit(); }}
+                          disabled={mediaExportBrowserLoading || mediaActionBusy === "export" || !mediaExportBrowser}
+                        >
+                          <Share2 size={14} />
+                          <span>
+                            {mediaActionBusy === "export"
+                              ? "Exporting..."
+                              : mediaExportOverwritePending
+                                ? "Overwrite Existing"
+                                : "Export Here"}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className="xmb-game-hub-action"
+                          onClick={() => { closeMediaExportBrowser(); }}
+                          disabled={mediaActionBusy === "export"}
+                        >
+                          <FolderOpen size={14} />
+                          <span>Cancel</span>
+                        </button>
+                      </div>
+                      {mediaActionMessage && <div className="xmb-game-hub-action-message">{mediaActionMessage}</div>}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="xmb-game-hub-eyebrow">Media</div>
+                    <div className="xmb-game-hub-title-row">
+                      <div className="xmb-game-hub-title">{selectedMediaAsset.gameTitle || selectedMediaAsset.fileName}</div>
+                    </div>
+                    <div className="xmb-game-meta xmb-game-hub-meta">
+                      {selectedMediaDetailChips.map((chip, index) => (
+                        <span key={`${index}-${chip}`} className="xmb-game-meta-chip">{chip}</span>
+                      ))}
+                    </div>
+                    {selectedMediaDetailCaption && <div className="xmb-game-hub-snapshot-caption">{selectedMediaDetailCaption}</div>}
+                  </>
+                )}
+              </div>
+            </div>
+          )}
           </div>
+
+      {mediaViewerAsset && (
+        <div className="sv-shot-modal" role="dialog" aria-modal="true" aria-label={isMediaViewerVideo ? "Video player" : "Image viewer"}>
+          <button
+            type="button"
+            className="sv-shot-modal-backdrop"
+            onClick={closeMediaViewer}
+            aria-label="Close media viewer"
+          />
+          <div className="sv-shot-modal-card">
+            <div className="sv-shot-modal-head">
+              <h4>{isMediaViewerVideo ? "Video Player" : "Image Viewer"}</h4>
+              <button
+                type="button"
+                className="sv-shot-modal-close"
+                onClick={closeMediaViewer}
+                aria-label="Close media viewer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            {mediaViewerLoading ? (
+              <div className="sv-shot-modal-loading">Loading media...</div>
+            ) : isMediaViewerVideo && mediaViewerSource ? (
+              <video
+                ref={mediaViewerVideoRef}
+                className="sv-shot-modal-video"
+                src={mediaViewerSource}
+                controls
+                autoPlay
+                playsInline
+                preload="metadata"
+                onLoadedMetadata={(event) => {
+                  void event.currentTarget.play().catch(() => undefined);
+                }}
+              />
+            ) : mediaViewerSource ? (
+              <img
+                className="sv-shot-modal-image"
+                src={mediaViewerSource}
+                alt={mediaViewerAsset.fileName}
+              />
+            ) : (
+              <div className="sv-shot-modal-loading">Unable to load media.</div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="xmb-footer">
         {topCategory === "current" ? (
@@ -1938,6 +2511,30 @@ export function ControllerLibraryPage({
                 )}
                 <span>Enter</span>
               </div>
+            ) : mediaViewerAsset && isMediaViewerVideo ? (
+              <>
+                <div className="xmb-btn-hint">
+                  <span className="xmb-btn-text-hint">L1 / R1</span>
+                  <span>Scrub 10s</span>
+                </div>
+                <div className="xmb-btn-hint">
+                  {controllerType === "ps" ? (
+                    <ButtonPSCircle className="xmb-btn-icon" size={24} />
+                  ) : (
+                    <ButtonB className="xmb-btn-icon" size={24} />
+                  )}
+                  <span>Close</span>
+                </div>
+              </>
+            ) : mediaViewerAsset ? (
+              <div className="xmb-btn-hint">
+                {controllerType === "ps" ? (
+                  <ButtonPSCircle className="xmb-btn-icon" size={24} />
+                ) : (
+                  <ButtonB className="xmb-btn-icon" size={24} />
+                )}
+                <span>Close</span>
+              </div>
             ) : (
               <>
                 <div className="xmb-btn-hint">
@@ -1946,8 +2543,26 @@ export function ControllerLibraryPage({
                   ) : (
                     <ButtonA className="xmb-btn-icon" size={24} />
                   )}
-                  <span>Open Folder</span>
+                  <span>{isMediaExportBrowserOpen ? "Select" : "Open"}</span>
                 </div>
+                <div className="xmb-btn-hint">
+                  {controllerType === "ps" ? (
+                    <ButtonPSSquare className="xmb-btn-icon" size={24} />
+                  ) : (
+                    <ButtonX className="xmb-btn-icon" size={24} />
+                  )}
+                  <span>{isMediaExportBrowserOpen ? "Close Browser" : "Export"}</span>
+                </div>
+                {!isMediaExportBrowserOpen && (
+                  <div className="xmb-btn-hint">
+                    {controllerType === "ps" ? (
+                      <ButtonPSTriangle className="xmb-btn-icon" size={24} />
+                    ) : (
+                      <ButtonY className="xmb-btn-icon" size={24} />
+                    )}
+                    <span>Delete</span>
+                  </div>
+                )}
                 <div className="xmb-btn-hint">
                   {controllerType === "ps" ? (
                     <ButtonPSCircle className="xmb-btn-icon" size={24} />

@@ -25,6 +25,7 @@ import { formatShortcutForDisplay, isShortcutMatch, normalizeShortcut } from "./
 import { useControllerNavigation } from "./controllerNavigation";
 import { usePlaytime } from "./utils/usePlaytime";
 import { createStreamDiagnosticsStore } from "./utils/streamDiagnosticsStore";
+import type { MediaListingEntry } from "@shared/gfn";
 
 // UI Components
 import { LoginScreen } from "./components/LoginScreen";
@@ -386,6 +387,8 @@ export function App(): JSX.Element {
   // Games State
   const [games, setGames] = useState<GameInfo[]>([]);
   const [libraryGames, setLibraryGames] = useState<GameInfo[]>([]);
+  const [mediaPreviewScreenshotId, setMediaPreviewScreenshotId] = useState<string | null>(null);
+  const [mediaPreviewRecordingId, setMediaPreviewRecordingId] = useState<string | null>(null);
   const [source, setSource] = useState<GameSource>("main");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedGameId, setSelectedGameId] = useState("");
@@ -2126,6 +2129,17 @@ export function App(): JSX.Element {
     return libraryGames.filter((g) => g.title.toLowerCase().includes(query));
   }, [libraryGames, searchQuery]);
 
+  const handleOpenMediaAsset = useCallback((asset: MediaListingEntry) => {
+    if (asset.durationMs && asset.durationMs > 0) {
+      setMediaPreviewRecordingId(asset.id);
+      setMediaPreviewScreenshotId(null);
+      return;
+    }
+
+    setMediaPreviewScreenshotId(asset.id);
+    setMediaPreviewRecordingId(null);
+  }, []);
+
   const activeSessionGameTitle = useMemo(() => {
     if (!navbarActiveSession) return null;
     const mappedTitle = gameTitleByAppId.get(navbarActiveSession.appId);
@@ -2228,6 +2242,8 @@ export function App(): JSX.Element {
             onReleasePointerLock={() => {
               void releasePointerLockIfNeeded();
             }}
+            openScreenshotId={mediaPreviewScreenshotId}
+            openRecordingId={mediaPreviewRecordingId}
           />
         )}
         {isSwitchingGame && settings.controllerMode && streamStatus !== "connecting" && (
@@ -2281,6 +2297,7 @@ export function App(): JSX.Element {
               favoriteGameIds={settings.favoriteGameIds}
               onToggleFavoriteGame={handleToggleFavoriteGame}
               onOpenSettings={() => setCurrentPage("settings")}
+              onOpenMediaAsset={handleOpenMediaAsset}
               currentStreamingGame={streamingGame}
               onResumeGame={() => setControllerOverlayOpen(false)}
               onCloseGame={async () => {
@@ -2419,6 +2436,7 @@ export function App(): JSX.Element {
               onSelectGameVariant={handleSelectGameVariant}
               favoriteGameIds={settings.favoriteGameIds}
               onToggleFavoriteGame={handleToggleFavoriteGame}
+              onOpenMediaAsset={handleOpenMediaAsset}
               onOpenSettings={() => setCurrentPage("settings")}
               currentStreamingGame={streamingGame}
               onResumeGame={handlePlayGame}

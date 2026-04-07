@@ -48,6 +48,7 @@ export const IPC_CHANNELS = {
   // Media browsing
   MEDIA_LIST_BY_GAME: "media:list-by-game",
   MEDIA_THUMBNAIL: "media:thumbnail",
+  MEDIA_DATA_URL: "media:data-url",
   MEDIA_SHOW_IN_FOLDER: "media:show-in-folder",
   MEDIA_EXPORT_BROWSE: "media:export-browse",
   MEDIA_EXPORT: "media:export",

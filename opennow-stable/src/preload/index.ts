@@ -121,6 +121,7 @@ const api: OpenNowApi = {
   listMediaByGame: (input: { gameTitle?: string } = {}): Promise<MediaListingResult> =>
     ipcRenderer.invoke(IPC_CHANNELS.MEDIA_LIST_BY_GAME, input),
   getMediaThumbnail: (input: { filePath: string }) => ipcRenderer.invoke(IPC_CHANNELS.MEDIA_THUMBNAIL, input),
+  getMediaDataUrl: (input: { filePath: string }) => ipcRenderer.invoke(IPC_CHANNELS.MEDIA_DATA_URL, input),
   showMediaInFolder: (input: { filePath: string }): Promise<void> =>
     ipcRenderer.invoke(IPC_CHANNELS.MEDIA_SHOW_IN_FOLDER, input),
   browseMediaExportLocations: (input: MediaExportBrowserRequest = {}): Promise<MediaExportBrowserResult> =>

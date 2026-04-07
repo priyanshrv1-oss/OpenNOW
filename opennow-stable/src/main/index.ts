@@ -1352,6 +1352,45 @@ function registerIpcHandlers(): void {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.MEDIA_DATA_URL, async (_event, payload: { filePath: string }): Promise<string | null> => {
+    const rawFp = payload?.filePath;
+    if (typeof rawFp !== "string") return null;
+    if (rawFp.length > 4096) return null;
+    try {
+      const allowedRoot = resolve(join(app.getPath("pictures"), "OpenNOW"));
+      const fpResolved = resolve(rawFp);
+      const allowedRootReal = await realpath(allowedRoot).catch(() => allowedRoot);
+      const fpReal = await realpath(fpResolved).catch(() => fpResolved);
+      const rel = relative(allowedRootReal, fpReal);
+      if (rel.startsWith("..")) return null;
+
+      const lower = fpReal.toLowerCase();
+      const buf = await readFile(fpReal);
+      if (lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".webp")) {
+        const extMatch = /\.([^.]+)$/.exec(fpReal);
+        const ext = (extMatch?.[1] || "png").toLowerCase();
+        const mime = ext === "jpg" || ext === "jpeg" ? "image/jpeg" : ext === "webp" ? "image/webp" : "image/png";
+        return `data:${mime};base64,${buf.toString("base64")}`;
+      }
+
+      if (lower.endsWith(".mp4") || lower.endsWith(".webm") || lower.endsWith(".mkv") || lower.endsWith(".mov")) {
+        const mime = lower.endsWith(".mp4")
+          ? "video/mp4"
+          : lower.endsWith(".webm")
+            ? "video/webm"
+            : lower.endsWith(".mov")
+              ? "video/quicktime"
+              : "video/x-matroska";
+        return `data:${mime};base64,${buf.toString("base64")}`;
+      }
+
+      return null;
+    } catch (err) {
+      console.warn("MEDIA_DATA_URL error:", err);
+      return null;
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.MEDIA_SHOW_IN_FOLDER, async (_event, payload: { filePath: string }): Promise<void> => {
     const rawFp = payload?.filePath;
     if (typeof rawFp !== "string") return;

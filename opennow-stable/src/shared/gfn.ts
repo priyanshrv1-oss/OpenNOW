@@ -431,6 +431,9 @@ export interface OpenNowApi {
   /** Resolve a thumbnail data URL for a media file path */
   getMediaThumbnail(input: { filePath: string }): Promise<string | null>;
 
+  /** Resolve a media data URL for in-app playback/viewing */
+  getMediaDataUrl(input: { filePath: string }): Promise<string | null>;
+
   /** Reveal a media file path in the system file manager */
   showMediaInFolder(input: { filePath: string }): Promise<void>;
 

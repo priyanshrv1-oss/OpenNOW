@@ -64,6 +64,8 @@ interface StreamViewProps {
   remainingPlaytimeText: string;
   micTrack?: MediaStreamTrack | null;
   className?: string;
+  openScreenshotId?: string | null;
+  openRecordingId?: string | null;
 }
 
 function getRttColor(rttMs: number): string {
@@ -334,6 +336,8 @@ export function StreamView({
   micTrack,
   hideStreamButtons = false,
   className,
+  openScreenshotId,
+  openRecordingId,
 }: StreamViewProps): JSX.Element {
   const stats = useStreamDiagnosticsStore(diagnosticsStore);
   const liveSessionContextRef = useRef({ serverRegion, sessionElapsedSeconds });
@@ -512,6 +516,31 @@ export function StreamView({
     if (!selectedScreenshotId) return null;
     return screenshots.find((item) => item.id === selectedScreenshotId) ?? null;
   }, [screenshots, selectedScreenshotId]);
+
+  useEffect(() => {
+    if (!openScreenshotId) return;
+    if (screenshots.some((item) => item.id === openScreenshotId)) {
+      setSelectedScreenshotId(openScreenshotId);
+      setActiveSidebarTab("preferences");
+      setShowSideBar(true);
+    }
+  }, [openScreenshotId, screenshots]);
+
+  useEffect(() => {
+    if (!openScreenshotId) return;
+    const selected = screenshots.find((item) => item.id === openScreenshotId);
+    if (selected) {
+      setSelectedScreenshotId(selected.id);
+    }
+  }, [openScreenshotId, screenshots]);
+
+  useEffect(() => {
+    if (!openRecordingId) return;
+    if (recordings.some((item) => item.id === openRecordingId)) {
+      setActiveSidebarTab("preferences");
+      setShowSideBar(true);
+    }
+  }, [openRecordingId, recordings]);
 
   useEffect(() => {
     setScreenshotShortcutInput(shortcuts.screenshot);
