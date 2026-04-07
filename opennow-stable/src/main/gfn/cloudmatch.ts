@@ -29,6 +29,11 @@ import type {
   SessionRequestData,
   SessionRequestMetadataEntry,
 } from "./types";
+import {
+  buildMonitorSettingFromStreamSettings,
+  normalizeMonitorSetting,
+  normalizePrimaryMonitorSetting,
+} from "./monitorSettings";
 import { SessionError } from "./errorCodes";
 
 const GFN_USER_AGENT =
@@ -429,34 +434,6 @@ function timezoneOffsetMs(): number {
   return -new Date().getTimezoneOffset() * 60 * 1000;
 }
 
-function normalizeMonitorSetting(setting: Partial<SessionMonitorSetting> | undefined): SessionMonitorSetting | undefined {
-  if (!setting) {
-    return undefined;
-  }
-
-  const widthInPixels = Number(setting.widthInPixels ?? 0);
-  const heightInPixels = Number(setting.heightInPixels ?? 0);
-  const framesPerSecond = Number(setting.framesPerSecond ?? 0);
-  if (!Number.isFinite(widthInPixels) || !Number.isFinite(heightInPixels) || !Number.isFinite(framesPerSecond)) {
-    return undefined;
-  }
-
-  return {
-    widthInPixels,
-    heightInPixels,
-    framesPerSecond,
-    sdrHdrMode: Number(setting.sdrHdrMode ?? 0),
-    displayData: setting.displayData
-      ? {
-          desiredContentMaxLuminance: Number(setting.displayData.desiredContentMaxLuminance ?? 0),
-          desiredContentMinLuminance: Number(setting.displayData.desiredContentMinLuminance ?? 0),
-          desiredContentMaxFrameAverageLuminance: Number(setting.displayData.desiredContentMaxFrameAverageLuminance ?? 0),
-        }
-      : undefined,
-    dpi: typeof setting.dpi === "number" ? setting.dpi : undefined,
-  };
-}
-
 function buildRequestedStreamingFeatures(settings: StreamSettings, hdrEnabled: boolean): RequestedStreamingFeatures {
   const bitDepth = colorQualityBitDepth(settings.colorQuality);
   const chromaFormat = colorQualityChromaFormat(settings.colorQuality);
@@ -498,48 +475,6 @@ function buildSessionMetadata(monitorSetting: SessionMonitorSetting): SessionReq
     },
     { key: "surroundAudioInfo", value: "2" },
   ];
-}
-
-function buildMonitorSettingFromStreamSettings(settings: StreamSettings): SessionMonitorSetting {
-  const { widthInPixels, heightInPixels } = {
-    widthInPixels: parseResolution(settings.resolution).width,
-    heightInPixels: parseResolution(settings.resolution).height,
-  };
-  const hdrEnabled = false;
-  return {
-    widthInPixels,
-    heightInPixels,
-    framesPerSecond: settings.fps,
-    sdrHdrMode: hdrEnabled ? 1 : 0,
-    displayData: {
-      desiredContentMaxLuminance: hdrEnabled ? 1000 : 0,
-      desiredContentMinLuminance: 0,
-      desiredContentMaxFrameAverageLuminance: hdrEnabled ? 500 : 0,
-    },
-    dpi: 100,
-  };
-}
-
-function normalizePrimaryMonitorSetting(
-  monitorSettings: Array<Partial<SessionMonitorSetting>> | undefined,
-  fallbackSettings?: StreamSettings,
-): SessionMonitorSetting {
-  const primary = monitorSettings?.map(normalizeMonitorSetting).find((entry) => entry !== undefined);
-  if (primary) {
-    return primary;
-  }
-  if (fallbackSettings) {
-    return buildMonitorSettingFromStreamSettings(fallbackSettings);
-  }
-  return buildMonitorSettingFromStreamSettings({
-    resolution: "1920x1080",
-    fps: 60,
-    maxBitrateMbps: 75,
-    codec: "H264",
-    colorQuality: "8bit_420",
-    gameLanguage: "en_US",
-    enableL4S: false,
-  });
 }
 
 function buildSessionRequestData(options: {
