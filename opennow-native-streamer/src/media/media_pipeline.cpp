@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <sstream>
 
 #if defined(OPENNOW_HAS_FFMPEG)
 extern "C" {
@@ -119,6 +120,17 @@ void MediaPipeline::PushAudioFrame(std::vector<std::uint8_t> encoded_frame, std:
 
 void MediaPipeline::RenderFrame() {
 #if defined(OPENNOW_HAS_SDL3)
+  std::optional<PendingVideoFrame> pending_frame;
+  {
+    std::lock_guard<std::mutex> lock(pending_video_mutex_);
+    if (pending_video_frame_) {
+      pending_frame = std::move(pending_video_frame_);
+      pending_video_frame_.reset();
+    }
+  }
+  if (pending_frame) {
+    UploadPendingFrame(*pending_frame);
+  }
   if (video_texture_ && renderer_) {
     SDL_RenderTexture(renderer_, video_texture_, nullptr, nullptr);
   }
@@ -206,7 +218,7 @@ void MediaPipeline::DecodeVideoFrame(const std::vector<std::uint8_t>& encoded_fr
     return;
   }
   while (avcodec_receive_frame(video_decoder_ctx_, video_frame_) == 0) {
-    UploadFrame(video_frame_);
+    StageFrame(video_frame_);
     rendered_frames_ += 1;
   }
 }
@@ -252,46 +264,68 @@ void MediaPipeline::DecodeAudioFrame(const std::vector<std::uint8_t>& encoded_fr
   }
 }
 
-void MediaPipeline::UploadFrame(AVFrame* frame) {
+void MediaPipeline::StageFrame(AVFrame* frame) {
   if (!renderer_) {
     return;
   }
-  if (!video_texture_ || texture_width_ != frame->width || texture_height_ != frame->height) {
+  sws_context_ = sws_getCachedContext(
+      sws_context_,
+      frame->width,
+      frame->height,
+      static_cast<AVPixelFormat>(frame->format),
+      frame->width,
+      frame->height,
+      AV_PIX_FMT_RGBA,
+      SWS_BILINEAR,
+      nullptr,
+      nullptr,
+      nullptr);
+  if (!sws_context_) {
+    Log("Failed to create FFmpeg swscale context for staging video frame");
+    return;
+  }
+  PendingVideoFrame pending;
+  pending.width = frame->width;
+  pending.height = frame->height;
+  pending.stride = frame->width * 4;
+  pending.rgba.resize(static_cast<std::size_t>(pending.stride * pending.height));
+  std::uint8_t* dst_data[4] = {pending.rgba.data(), nullptr, nullptr, nullptr};
+  int dst_linesize[4] = {pending.stride, 0, 0, 0};
+  sws_scale(sws_context_, frame->data, frame->linesize, 0, frame->height, dst_data, dst_linesize);
+  {
+    std::lock_guard<std::mutex> lock(pending_video_mutex_);
+    pending_video_frame_ = std::move(pending);
+  }
+  std::ostringstream thread_id;
+  thread_id << std::this_thread::get_id();
+  Log("Staged decoded video frame on worker thread " + thread_id.str());
+}
+
+void MediaPipeline::UploadPendingFrame(const PendingVideoFrame& frame) {
+  if (!renderer_) {
+    return;
+  }
+  if (!video_texture_ || texture_width_ != frame.width || texture_height_ != frame.height) {
     if (video_texture_) {
       SDL_DestroyTexture(video_texture_);
       video_texture_ = nullptr;
     }
-    texture_width_ = frame->width;
-    texture_height_ = frame->height;
+    texture_width_ = frame.width;
+    texture_height_ = frame.height;
     video_texture_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, texture_width_, texture_height_);
     if (!video_texture_) {
-      Log("Failed to create SDL streaming texture");
+      Log("Failed to create SDL streaming texture on render thread");
       return;
     }
-    sws_context_ = sws_getCachedContext(
-        sws_context_,
-        frame->width,
-        frame->height,
-        static_cast<AVPixelFormat>(frame->format),
-        frame->width,
-        frame->height,
-        AV_PIX_FMT_RGBA,
-        SWS_BILINEAR,
-        nullptr,
-        nullptr,
-        nullptr);
+    Log("Created/updated SDL video texture on render thread");
   }
-
-  void* pixels = nullptr;
-  int pitch = 0;
-  if (!SDL_LockTexture(video_texture_, nullptr, &pixels, &pitch)) {
+  if (!SDL_UpdateTexture(video_texture_, nullptr, frame.rgba.data(), frame.stride)) {
     Log(SDL_GetError());
     return;
   }
-  std::uint8_t* dst_data[4] = {static_cast<std::uint8_t*>(pixels), nullptr, nullptr, nullptr};
-  int dst_linesize[4] = {pitch, 0, 0, 0};
-  sws_scale(sws_context_, frame->data, frame->linesize, 0, frame->height, dst_data, dst_linesize);
-  SDL_UnlockTexture(video_texture_);
+  std::ostringstream thread_id;
+  thread_id << std::this_thread::get_id();
+  Log("Uploaded staged video frame on render thread " + thread_id.str());
 }
 #endif
 

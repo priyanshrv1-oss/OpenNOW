@@ -26,6 +26,14 @@ typedef void* SDL_AudioStream;
 
 namespace opennow::native {
 
+struct PendingVideoFrame {
+  std::vector<std::uint8_t> rgba;
+  int width = 0;
+  int height = 0;
+  int stride = 0;
+  std::uint64_t timestamp_us = 0;
+};
+
 class MediaPipeline {
  public:
   using LogFn = std::function<void(const std::string&)>;
@@ -53,7 +61,8 @@ class MediaPipeline {
   bool EnsureAudioDecoder(std::string& error);
   void DecodeVideoFrame(const std::vector<std::uint8_t>& encoded_frame);
   void DecodeAudioFrame(const std::vector<std::uint8_t>& encoded_frame);
-  void UploadFrame(::AVFrame* frame);
+  void StageFrame(::AVFrame* frame);
+  void UploadPendingFrame(const PendingVideoFrame& frame);
 #endif
 
   LogFn logger_;
@@ -68,6 +77,8 @@ class MediaPipeline {
   int audio_clock_rate_ = 48000;
   int audio_channels_ = 2;
   std::uint64_t rendered_frames_ = 0;
+  mutable std::mutex pending_video_mutex_;
+  std::optional<PendingVideoFrame> pending_video_frame_;
 #if defined(OPENNOW_HAS_SDL3) && defined(OPENNOW_HAS_FFMPEG)
   ::AVCodecContext* video_decoder_ctx_ = nullptr;
   ::AVCodecContext* audio_decoder_ctx_ = nullptr;
