@@ -7,7 +7,7 @@ import {
   type AddressInfo,
   type Server,
 } from "node:net";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import type {
   IceCandidatePayload,
@@ -466,26 +466,29 @@ export class NativeStreamerManager {
   private resolveExecutablePath(): string {
     const envPath = process.env.OPENNOW_NATIVE_STREAMER_BIN?.trim();
     const executableName = process.platform === "win32" ? "opennow-native-streamer.exe" : "opennow-native-streamer";
+    const repoRoot = resolve(this.workspaceRoot);
+    const nativeProjectRoot = join(repoRoot, "opennow-native-streamer");
+    const existenceFlag = process.platform === "win32" ? constants.F_OK : constants.X_OK;
     const packagedCandidates = [
       join(process.resourcesPath, "native-streamer", process.platform, executableName),
       join(process.resourcesPath, "opennow-native-streamer", "bin", executableName),
     ];
     const devCandidates = [
-      join(this.workspaceRoot, "opennow-native-streamer", "build", executableName),
-      join(this.workspaceRoot, "opennow-native-streamer", "build", "Release", executableName),
-      join(this.workspaceRoot, "opennow-native-streamer", "build", "Debug", executableName),
-      join(this.workspaceRoot, "opennow-native-streamer", "dist", executableName),
+      join(nativeProjectRoot, "build", executableName),
+      join(nativeProjectRoot, "build", "Release", executableName),
+      join(nativeProjectRoot, "build", "Debug", executableName),
+      join(nativeProjectRoot, "dist", executableName),
     ];
 
     const candidates = [
-      ...(envPath ? [envPath] : []),
+      ...(envPath ? [resolve(envPath)] : []),
       ...(app.isPackaged ? packagedCandidates : []),
       ...devCandidates,
     ];
 
     for (const candidate of candidates) {
       try {
-        accessSync(candidate, constants.X_OK);
+        accessSync(candidate, existenceFlag);
         return candidate;
       } catch {
         // Try the next candidate.
@@ -493,7 +496,7 @@ export class NativeStreamerManager {
     }
 
     throw new Error(
-      `OpenNOW Native Streamer binary was not found. Build ${join(this.workspaceRoot, "opennow-native-streamer")} and place ${executableName} in build/, build/Release/, build/Debug/, or set OPENNOW_NATIVE_STREAMER_BIN.`,
+      `OpenNOW Native Streamer binary was not found. Expected it under ${nativeProjectRoot} (for example ${join(nativeProjectRoot, "build", executableName)}) or set OPENNOW_NATIVE_STREAMER_BIN.`,
     );
   }
 }

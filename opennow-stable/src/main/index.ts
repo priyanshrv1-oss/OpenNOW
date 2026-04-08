@@ -197,6 +197,29 @@ let settingsManager: SettingsManager;
 let nativeStreamerManager: NativeStreamerManager;
 const SCREENSHOT_LIMIT = 60;
 
+function resolveOpenNowRepoRoot(): string {
+  const anchors = [app.getAppPath(), __dirname, process.cwd()];
+
+  for (const anchor of anchors) {
+    let current = resolve(anchor);
+    while (true) {
+      const hasNativeStreamer = existsSync(join(current, "opennow-native-streamer"));
+      const hasElectronApp = existsSync(join(current, "opennow-stable"));
+      if (hasNativeStreamer && hasElectronApp) {
+        return current;
+      }
+
+      const parent = dirname(current);
+      if (parent === current) {
+        break;
+      }
+      current = parent;
+    }
+  }
+
+  return resolve(app.getAppPath(), "..");
+}
+
 function getScreenshotDirectory(): string {
   return join(app.getPath("pictures"), "OpenNOW", "Screenshots");
 }
@@ -1207,7 +1230,7 @@ app.whenReady().then(async () => {
 
   settingsManager = getSettingsManager();
   nativeStreamerManager = new NativeStreamerManager({
-    workspaceRoot: resolve(__dirname, "../../../.."),
+    workspaceRoot: resolveOpenNowRepoRoot(),
     onAnswer: async (payload) => {
       if (!signalingClient) {
         throw new Error("Signaling is not connected");
