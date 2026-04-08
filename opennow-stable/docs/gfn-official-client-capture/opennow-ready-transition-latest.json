@@ -1,0 +1,59 @@
+{
+  "capturedAt": "2026-04-08T05:41:31.133Z",
+  "mode": "poll-session",
+  "sourceHost": "prod.cloudmatchbeta.nvidiagrid.net",
+  "effectiveHost": "66-22-133-150.cloudmatchbeta.nvidiagrid.net",
+  "repolledDirectly": false,
+  "resolvedServerIp": "66-22-133-150.cloudmatchbeta.nvidiagrid.net",
+  "payload": {
+    "requestStatus": {
+      "statusCode": 1,
+      "statusDescription": "SUCCESS_STATUS",
+      "unifiedErrorCode": 0,
+      "requestId": "91977428-86c6-4bed-897f-f26d1622422f",
+      "serverId": "NP-ATL-03",
+      "countryCode": null
+    },
+    "session": {
+      "sessionId": "<redacted-session-id>",
+      "status": 2,
+      "seatSetupInfo": {
+        "queuePosition": 0,
+        "seatSetupEta": 20000,
+        "seatSetupStep": 3
+      },
+      "sessionAdsRequired": false,
+      "errorCode": 1,
+      "gpuType": "3050b / L40G-6",
+      "sessionControlInfo": {
+        "ip": "np-mia-03.cloudmatchbeta.nvidiagrid.net",
+        "port": 443,
+        "protocol": 0,
+        "appLevelProtocol": 5,
+        "resourcePath": "/v2/session/96e9d71d-2aa3-1569-d89a-fa6fa7a0ed21",
+        "usage": 10
+      },
+      "connectionInfo": [
+        {
+          "ip": null,
+          "port": 322,
+          "protocol": 1,
+          "appLevelProtocol": 6,
+          "resourcePath": "rtsps://66-22-133-150.cloudmatchbeta.nvidiagrid.net:322",
+          "usage": 14
+        },
+        {
+          "ip": null,
+          "port": 48322,
+          "protocol": 1,
+          "appLevelProtocol": 6,
+          "resourcePath": "rtsps://66-22-133-150.cloudmatchbeta.nvidiagrid.net:48322",
+          "usage": 14
+        }
+      ],
+      "iceServerConfiguration": {
+        "iceServersCount": 0
+      }
+    }
+  }
+}
