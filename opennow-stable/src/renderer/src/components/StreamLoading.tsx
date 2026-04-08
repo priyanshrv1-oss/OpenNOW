@@ -1,5 +1,14 @@
 import { Loader2, Monitor, Cpu, Wifi, X, XCircle } from "lucide-react";
 import type { JSX, Ref } from "react";
+import {
+  getPreferredSessionAdMediaUrl,
+  getSessionAdDurationMs,
+  getSessionAdGracePeriodSeconds,
+  getSessionAdItems,
+  getSessionAdMessage,
+  isSessionAdsRequired,
+  isSessionQueuePaused,
+} from "@shared/gfn";
 import type { SessionAdInfo, SessionAdState } from "@shared/gfn";
 import { getStoreDisplayName, getStoreIconComponent } from "./GameCard";
 import { QueueAdPreview, type QueueAdPlaybackEvent, type QueueAdPreviewHandle } from "./QueueAdPreview";
@@ -39,7 +48,7 @@ function getStatusMessage(
   if (isError) {
     return "Game launch failed";
   }
-  if (adState?.isQueuePaused) {
+  if (isSessionQueuePaused(adState)) {
     return "Session queue paused";
   }
   switch (status) {
@@ -71,17 +80,19 @@ function getActiveStepIndex(status: StreamLoadingProps["status"]): number {
 }
 
 function getAdSummary(adState?: SessionAdState): string | null {
-  if (!adState?.isAdsRequired) {
+  if (!isSessionAdsRequired(adState)) {
     return null;
   }
-  if (adState.message) {
-    return adState.message;
+  const message = getSessionAdMessage(adState);
+  if (message) {
+    return message;
   }
-  if (adState.isQueuePaused) {
+  if (isSessionQueuePaused(adState)) {
     return "Resume ads to stay in queue.";
   }
-  return adState.ads.length > 0
-    ? `${adState.ads.length} ad${adState.ads.length === 1 ? "" : "s"} available for queue progression.`
+  const ads = getSessionAdItems(adState);
+  return ads.length > 0
+    ? `${ads.length} ad${ads.length === 1 ? "" : "s"} available for queue progression.`
     : "Ad playback is required while your session is queued.";
 }
 
@@ -106,8 +117,10 @@ export function StreamLoading({
   const platformName = platformStore ? getStoreDisplayName(platformStore) : "";
   const PlatformIcon = platformStore ? getStoreIconComponent(platformStore) : null;
   const adSummary = getAdSummary(adState);
-  const cachedAdMediaUrl = activeAdMediaUrl ?? activeAd?.mediaUrl;
-  const activeAdDurationSeconds = activeAd?.durationMs ? Math.round(activeAd.durationMs / 1000) : undefined;
+  const cachedAdMediaUrl = activeAdMediaUrl ?? getPreferredSessionAdMediaUrl(activeAd);
+  const activeAdDurationMs = getSessionAdDurationMs(activeAd);
+  const activeAdDurationSeconds = activeAdDurationMs ? Math.round(activeAdDurationMs / 1000) : undefined;
+  const gracePeriodSeconds = getSessionAdGracePeriodSeconds(adState);
 
   return (
     <div className={`sload${hasError ? " sload--error" : ""}`}>
@@ -180,14 +193,14 @@ export function StreamLoading({
           <div className="sload-status-text">
             <p className="sload-message">{statusMessage}</p>
             {!hasError && activeAd && cachedAdMediaUrl && (
-              <div className={`sload-ad${adState?.isQueuePaused ? " sload-ad--paused" : ""}`}>
+              <div className={`sload-ad${isSessionQueuePaused(adState) ? " sload-ad--paused" : ""}`}>
                 <div className="sload-ad-copy">
                   <span className="sload-ad-chip">Ad Queue</span>
                   <p className="sload-ad-title">{activeAd.title ?? "Advertisement in progress"}</p>
                   {adSummary && <p className="sload-ad-message">{adSummary}</p>}
                   <div className="sload-ad-meta">
                     {activeAdDurationSeconds && <span>{activeAdDurationSeconds}s spot</span>}
-                    {adState?.gracePeriodSeconds && <span>{adState.gracePeriodSeconds}s grace window</span>}
+                    {gracePeriodSeconds && <span>{gracePeriodSeconds}s grace window</span>}
                   </div>
                 </div>
                 <div className="sload-ad-media">

@@ -2,7 +2,7 @@ import { AlertTriangle, Loader2, PauseCircle, PlayCircle, RefreshCcw, XCircle } 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type JSX } from "react";
 
 type QueueAdPlaybackState = "loading" | "playing" | "paused" | "stalled" | "blocked" | "timeout" | "error";
-export type QueueAdPlaybackEvent = "loadstart" | "playing" | "paused" | "ended" | "timeupdate";
+export type QueueAdPlaybackEvent = "loadstart" | "playing" | "paused" | "ended" | "timeupdate" | "error";
 
 export interface QueueAdPreviewHandle {
   attemptPlayback: () => Promise<void>;
@@ -192,14 +192,6 @@ export const QueueAdPreview = forwardRef<QueueAdPreviewHandle, QueueAdPreviewPro
 
     const handleTimeUpdate = (): void => {
       onPlaybackEventRef.current?.("timeupdate");
-      if (finishFiredRef.current) {
-        return;
-      }
-      const d = video.duration;
-      if (isFinite(d) && d > 0 && video.currentTime >= d) {
-        finishFiredRef.current = true;
-        onPlaybackEventRef.current?.("ended");
-      }
     };
 
     const handleEnded = (): void => {
@@ -224,6 +216,7 @@ export const QueueAdPreview = forwardRef<QueueAdPreviewHandle, QueueAdPreviewPro
 
     const handleError = (): void => {
       setPlayback("error");
+      onPlaybackEventRef.current?.("error");
     };
 
     video.addEventListener("loadstart", handleLoadStart);

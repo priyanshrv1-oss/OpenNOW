@@ -320,6 +320,11 @@ export interface SessionAdReportRequest {
   deviceId?: string;
   adId: string;
   action: SessionAdAction;
+  clientTimestamp?: number;
+  watchedTimeInMs?: number;
+  pausedTimeInMs?: number;
+  cancelReason?: string;
+  errorInfo?: string;
 }
 
 export interface IceServer {
@@ -341,11 +346,29 @@ export interface NegotiatedStreamProfile {
   enableL4S?: boolean;
 }
 
+export interface SessionAdMediaFile {
+  mediaFileUrl?: string;
+  encodingProfile?: string;
+}
+
+export interface SessionOpportunityInfo {
+  state?: string;
+  queuePaused?: boolean;
+  gracePeriodSeconds?: number;
+  message?: string;
+  title?: string;
+  description?: string;
+}
+
 export interface SessionAdInfo {
   adId: string;
   state?: number;
+  adState?: number;
+  adUrl?: string;
   mediaUrl?: string;
+  adMediaFiles?: SessionAdMediaFile[];
   clickThroughUrl?: string;
+  adLengthInSeconds?: number;
   durationMs?: number;
   title?: string;
   description?: string;
@@ -353,10 +376,13 @@ export interface SessionAdInfo {
 
 export interface SessionAdState {
   isAdsRequired: boolean;
+  sessionAdsRequired?: boolean;
   isQueuePaused?: boolean;
   gracePeriodSeconds?: number;
   message?: string;
+  sessionAds: SessionAdInfo[];
   ads: SessionAdInfo[];
+  opportunity?: SessionOpportunityInfo;
   /**
    * True when the server explicitly returned sessionAds=null (transient gap
    * between polls). False/absent when ads were populated by the server or
@@ -365,6 +391,42 @@ export interface SessionAdState {
    */
   serverSentEmptyAds?: boolean;
   enableL4S?: boolean;
+}
+
+export function getSessionAdItems(adState: SessionAdState | undefined): SessionAdInfo[] {
+  return adState?.sessionAds ?? adState?.ads ?? [];
+}
+
+export function isSessionAdsRequired(adState: SessionAdState | undefined): boolean {
+  return adState?.sessionAdsRequired ?? adState?.isAdsRequired ?? false;
+}
+
+export function getSessionAdOpportunity(adState: SessionAdState | undefined): SessionOpportunityInfo | undefined {
+  return adState?.opportunity;
+}
+
+export function isSessionQueuePaused(adState: SessionAdState | undefined): boolean {
+  return getSessionAdOpportunity(adState)?.queuePaused ?? adState?.isQueuePaused ?? false;
+}
+
+export function getSessionAdGracePeriodSeconds(adState: SessionAdState | undefined): number | undefined {
+  return getSessionAdOpportunity(adState)?.gracePeriodSeconds ?? adState?.gracePeriodSeconds;
+}
+
+export function getSessionAdMessage(adState: SessionAdState | undefined): string | undefined {
+  const opportunity = getSessionAdOpportunity(adState);
+  return opportunity?.message ?? opportunity?.description ?? adState?.message;
+}
+
+export function getPreferredSessionAdMediaUrl(ad: SessionAdInfo | undefined): string | undefined {
+  return ad?.adMediaFiles?.find((mediaFile) => mediaFile.mediaFileUrl)?.mediaFileUrl ?? ad?.adUrl ?? ad?.mediaUrl;
+}
+
+export function getSessionAdDurationMs(ad: SessionAdInfo | undefined): number | undefined {
+  if (typeof ad?.adLengthInSeconds === "number" && Number.isFinite(ad.adLengthInSeconds) && ad.adLengthInSeconds > 0) {
+    return Math.round(ad.adLengthInSeconds * 1000);
+  }
+  return ad?.durationMs;
 }
 
 export interface SessionInfo {

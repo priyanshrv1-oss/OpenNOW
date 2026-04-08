@@ -57,6 +57,12 @@ const AD_ACTION_CODES: Record<SessionAdAction, number> = {
   cancel: 5,
 };
 
+const GFN_AD_MEDIA_PROFILE_ORDER = new Map<string, number>([
+  ["mp4deinterlaced720p", 0],
+  ["webm", 1],
+  ["hlsadaptive", 2],
+]);
+
 function isReadySessionStatus(status: number): boolean {
   return READY_SESSION_STATUSES.has(status);
 }
@@ -659,10 +665,17 @@ function shouldUseServerIp(baseUrl: string): boolean {
 
 function resolvePollStopBase(zone: string, provided?: string, serverIp?: string): string {
   const base = resolveStreamingBaseUrl(zone, provided);
-  // Only use serverIp if it's a real server IP (not a zone hostname).
-  // The Rust version checks: if we're NOT an alliance partner AND we have a server_ip, use it.
-  // But if the "serverIp" is actually the zone hostname (from an early poll when connectionInfo
-  // was empty), using it is circular and doesn't help.
+  // CloudMatch queue/ad/session endpoints are host-pinned once the session control
+  // host is known. Official captures show `/v2/session/<id>` moving from generic
+  // provider hosts like `prod.cloudmatchbeta...` onto specific zone hosts such as
+  // `np-mia-04.cloudmatchbeta...` before ad updates are sent. Keep the provider
+  // base only until CloudMatch gives us a different host.
+  if (serverIp && shouldUseServerIp(base)) {
+    const baseHost = extractHostFromUrl(base) ?? base.replace(/^https?:\/\//, "").split("/")[0] ?? "";
+    if (serverIp !== baseHost) {
+      return `https://${serverIp}`;
+    }
+  }
   if (serverIp && shouldUseServerIp(base) && !isZoneHostname(serverIp)) {
     return `https://${serverIp}`;
   }
@@ -751,43 +764,60 @@ function extractSeatSetupStep(payload: CloudMatchResponse): number | undefined {
 
 function normalizeSessionAdInfo(ad: NonNullable<CloudMatchResponse["session"]["sessionAds"]>[number], index: number): SessionAdInfo | null {
   const adId = toOptionalString(ad.adId);
+  const adMediaFiles = (ad.adMediaFiles ?? [])
+    .map((file) => ({
+      mediaFileUrl: toOptionalString(file.mediaFileUrl),
+      encodingProfile: toOptionalString(file.encodingProfile),
+    }))
+    .filter((file) => file.mediaFileUrl || file.encodingProfile)
+    .sort((left, right) => {
+      const leftRank = left.encodingProfile ? GFN_AD_MEDIA_PROFILE_ORDER.get(left.encodingProfile) ?? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER;
+      const rightRank = right.encodingProfile ? GFN_AD_MEDIA_PROFILE_ORDER.get(right.encodingProfile) ?? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER;
+      return leftRank - rightRank;
+    });
 
-  // Prefer the progressive MP4 from adMediaFiles (most compatible in Electron),
-  // then HLS, then the top-level adUrl, then legacy field names.
-  const mp4Source = ad.adMediaFiles?.find((f) => f.encodingProfile === "mp4deinterlaced720p")?.mediaFileUrl;
-  const hlsSource = ad.adMediaFiles?.find((f) => f.encodingProfile === "hlsadaptive")?.mediaFileUrl;
+  // Match the official browser config preference order: MP4, WebM, then HLS.
+  const preferredMediaFile = adMediaFiles.find((file) => file.mediaFileUrl);
   const mediaUrl =
-    toOptionalString(mp4Source) ??
-    toOptionalString(hlsSource) ??
+    preferredMediaFile?.mediaFileUrl ??
     toOptionalString(ad.adUrl) ??
     toOptionalString(ad.mediaUrl) ??
     toOptionalString(ad.videoUrl) ??
     toOptionalString(ad.url);
 
+  const adUrl = toOptionalString(ad.adUrl);
   const clickThroughUrl = toOptionalString(ad.clickThroughUrl);
   const title = toOptionalString(ad.title);
   const description = toOptionalString(ad.description);
+  const adLengthInSeconds =
+    typeof ad.adLengthInSeconds === "number" && Number.isFinite(ad.adLengthInSeconds) && ad.adLengthInSeconds > 0
+      ? ad.adLengthInSeconds
+      : undefined;
 
   // adLengthInSeconds is the confirmed live field (value is in seconds, convert to ms).
   // Fall back to legacy durationMs / durationInMs which are already in ms.
   const durationMs =
-    (typeof ad.adLengthInSeconds === "number" && Number.isFinite(ad.adLengthInSeconds) && ad.adLengthInSeconds > 0
-      ? Math.round(ad.adLengthInSeconds * 1000)
+    (adLengthInSeconds !== undefined
+      ? Math.round(adLengthInSeconds * 1000)
       : undefined) ??
     toPositiveInt(ad.durationMs) ??
     toPositiveInt(ad.durationInMs);
 
-  const state = typeof ad.adState === "number" && Number.isFinite(ad.adState) ? Math.trunc(ad.adState) : undefined;
+  const adState = typeof ad.adState === "number" && Number.isFinite(ad.adState) ? Math.trunc(ad.adState) : undefined;
 
-  if (!adId && !mediaUrl && !title && !description) {
+  if (!adId && !mediaUrl && !adUrl && adMediaFiles.length === 0 && !title && !description) {
     return null;
   }
 
   return {
     adId: adId ?? `ad-${index + 1}`,
-    state,
+    state: adState,
+    adState,
+    adUrl,
     mediaUrl,
+    adMediaFiles,
     clickThroughUrl,
+    adLengthInSeconds,
     durationMs,
     title,
     description,
@@ -795,7 +825,7 @@ function normalizeSessionAdInfo(ad: NonNullable<CloudMatchResponse["session"]["s
 }
 
 function extractAdState(payload: CloudMatchResponse): SessionAdState | undefined {
-  const isAdsRequired =
+  const sessionAdsRequired =
     toBoolean(payload.session.sessionAdsRequired) ??
     toBoolean(payload.session.isAdsRequired) ??
     toBoolean(payload.session.sessionProgress?.isAdsRequired) ??
@@ -803,7 +833,7 @@ function extractAdState(payload: CloudMatchResponse): SessionAdState | undefined
 
   // Log raw sessionAds whenever the server signals ads are required so field names
   // can be verified when creative URLs are expected but the ads[] array stays empty.
-  if (isAdsRequired) {
+  if (sessionAdsRequired) {
     console.log(
       `[CloudMatch] extractAdState: sessionAdsRequired=${payload.session.sessionAdsRequired}, ` +
       `isAdsRequired=${payload.session.isAdsRequired}, ` +
@@ -817,14 +847,24 @@ function extractAdState(payload: CloudMatchResponse): SessionAdState | undefined
     .filter((ad): ad is SessionAdInfo => ad !== null);
 
   const opportunity = payload.session.opportunity;
+  const normalizedOpportunity = opportunity
+    ? {
+        state: toOptionalString(opportunity.state),
+        queuePaused: toBoolean(opportunity.queuePaused),
+        gracePeriodSeconds: toPositiveInt(opportunity.gracePeriodSeconds),
+        message: toOptionalString(opportunity.message),
+        title: toOptionalString(opportunity.title),
+        description: toOptionalString(opportunity.description),
+      }
+    : undefined;
   const queuePaused =
-    toBoolean(opportunity?.queuePaused) ??
-    (typeof opportunity?.state === "string" ? opportunity.state.toLowerCase() === "graceperiodstart" : undefined);
-  const gracePeriodSeconds = toPositiveInt(opportunity?.gracePeriodSeconds);
-  const effectiveIsAdsRequired = isAdsRequired ?? ads.length > 0;
+    normalizedOpportunity?.queuePaused ??
+    (typeof normalizedOpportunity?.state === "string" ? normalizedOpportunity.state.toLowerCase() === "graceperiodstart" : undefined);
+  const gracePeriodSeconds = normalizedOpportunity?.gracePeriodSeconds;
+  const effectiveIsAdsRequired = sessionAdsRequired ?? ads.length > 0;
   const message =
-    toOptionalString(opportunity?.message) ??
-    toOptionalString(opportunity?.description) ??
+    normalizedOpportunity?.message ??
+    normalizedOpportunity?.description ??
     (queuePaused
       ? "Resume ads to stay in queue."
       : effectiveIsAdsRequired
@@ -837,10 +877,13 @@ function extractAdState(payload: CloudMatchResponse): SessionAdState | undefined
 
   return {
     isAdsRequired: effectiveIsAdsRequired,
+    sessionAdsRequired,
     isQueuePaused: queuePaused,
     gracePeriodSeconds,
     message,
+    sessionAds: ads,
     ads,
+    opportunity: normalizedOpportunity,
     // Mark whether the server sent sessionAds=null (transient gap) so the
     // renderer's mergeAdState can safely restore the previous ad list for the
     // ad player, while NOT restoring it after an explicit client-side clear
@@ -1109,23 +1152,34 @@ export async function reportSessionAd(input: SessionAdReportRequest): Promise<Se
   const deviceId = input.deviceId ?? crypto.randomUUID();
   const base = resolvePollStopBase(input.zone, input.streamingBaseUrl, input.serverIp);
   const url = `${base}/v2/session/${input.sessionId}`;
+  const clientTimestamp = input.clientTimestamp ?? Math.floor(Date.now() / 1000);
+  const adUpdate = {
+    adId: input.adId,
+    adAction: AD_ACTION_CODES[input.action],
+    clientTimestamp,
+    ...(typeof input.watchedTimeInMs === "number"
+      ? { watchedTimeInMs: Math.max(0, Math.round(input.watchedTimeInMs)) }
+      : {}),
+    ...(typeof input.pausedTimeInMs === "number"
+      ? { pausedTimeInMs: Math.max(0, Math.round(input.pausedTimeInMs)) }
+      : {}),
+    ...(input.cancelReason ? { cancelReason: input.cancelReason } : {}),
+  };
   const requestBody = {
     action: SESSION_MODIFY_ACTION_AD_UPDATE,
-    adUpdates: [{
-      adId: input.adId,
-      adAction: AD_ACTION_CODES[input.action],
-      clientTimestamp: Math.round(Date.now() / 1000),
-    }],
+    adUpdates: [adUpdate],
   };
 
   console.log(
     `[CloudMatch] reportSessionAd: sending action=${input.action}(${requestBody.adUpdates[0].adAction}), adId=${input.adId}, ` +
-      `sessionId=${input.sessionId}, zone=${input.zone}, url=${url}`,
+      `sessionId=${input.sessionId}, zone=${input.zone}, url=${url}, ` +
+      `cancelReason=${input.cancelReason ?? "n/a"}, errorInfo=${input.errorInfo ?? "n/a"}`,
   );
 
   const response = await fetch(url, {
     method: "PUT",
-    headers: requestHeaders({ token: input.token, clientId, deviceId, includeOrigin: false }),
+    // Official browser requests include Origin/Referer on cross-origin ad updates.
+    headers: requestHeaders({ token: input.token, clientId, deviceId, includeOrigin: true }),
     body: JSON.stringify(requestBody),
   });
 

@@ -1,5 +1,12 @@
 import { Loader2, Zap } from "lucide-react";
 import type { JSX, Ref } from "react";
+import {
+  getPreferredSessionAdMediaUrl,
+  getSessionAdDurationMs,
+  getSessionAdGracePeriodSeconds,
+  getSessionAdMessage,
+  isSessionQueuePaused,
+} from "@shared/gfn";
 import type { SessionAdInfo, SessionAdState } from "@shared/gfn";
 import { formatPlaytime } from "../utils/usePlaytime";
 import type { PlaytimeStore } from "../utils/usePlaytime";
@@ -26,7 +33,7 @@ function getStatusMessage(
   queuePosition?: number,
   adState?: SessionAdState,
 ): string {
-  if (adState?.isQueuePaused) {
+  if (isSessionQueuePaused(adState)) {
     return "Session queue paused";
   }
   switch (status) {
@@ -79,9 +86,11 @@ export function ControllerStreamLoading({
   const playtimeRecord = gameId ? playtimeData[gameId] : undefined;
   const totalSecs = playtimeRecord?.totalSeconds ?? 0;
   const playtimeLabel = formatPlaytime(totalSecs);
-  const cachedAdMediaUrl = activeAdMediaUrl ?? activeAd?.mediaUrl;
-  const adDurationSeconds = activeAd?.durationMs ? Math.round(activeAd.durationMs / 1000) : undefined;
-  const adMessage = adState?.message ?? (adState?.isQueuePaused ? "Resume ads to stay in queue." : undefined);
+  const cachedAdMediaUrl = activeAdMediaUrl ?? getPreferredSessionAdMediaUrl(activeAd);
+  const adDurationMs = getSessionAdDurationMs(activeAd);
+  const adDurationSeconds = adDurationMs ? Math.round(adDurationMs / 1000) : undefined;
+  const adMessage = getSessionAdMessage(adState) ?? (isSessionQueuePaused(adState) ? "Resume ads to stay in queue." : undefined);
+  const gracePeriodSeconds = getSessionAdGracePeriodSeconds(adState);
 
   return (
     <div className="controller-stream-loading">
@@ -137,7 +146,7 @@ export function ControllerStreamLoading({
               <div className="csl-status-message">{statusMessage}</div>
 
               {activeAd && cachedAdMediaUrl && (
-                <div className={`csl-ad-panel${adState?.isQueuePaused ? " csl-ad-panel--paused" : ""}`}>
+                <div className={`csl-ad-panel${isSessionQueuePaused(adState) ? " csl-ad-panel--paused" : ""}`}>
                   <div className="csl-ad-copy">
                     <span className="csl-ad-chip">Ad Queue</span>
                     <div className="csl-ad-title">
@@ -146,7 +155,7 @@ export function ControllerStreamLoading({
                     {adMessage && <div className="csl-ad-message">{adMessage}</div>}
                     <div className="csl-ad-meta">
                       {adDurationSeconds && <span>{adDurationSeconds}s spot</span>}
-                      {adState?.gracePeriodSeconds && <span>{adState.gracePeriodSeconds}s grace window</span>}
+                      {gracePeriodSeconds && <span>{gracePeriodSeconds}s grace window</span>}
                     </div>
                   </div>
                   <div className="csl-ad-media">
