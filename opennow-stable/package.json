@@ -20,6 +20,7 @@
     "preview": "electron-vite preview",
     "dist": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder",
     "dist:signed": "npm run build && electron-builder",
+    "dist:linux:rpm": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --linux rpm",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
@@ -38,6 +39,7 @@
     "electron": "^41.1.1",
     "electron-builder": "^26.8.1",
     "electron-vite": "^5.0.0",
+    "react-scan": "^0.5.3",
     "typescript": "^6.0.2",
     "vite": "^7.3.1"
   },
@@ -87,11 +89,41 @@
     "linux": {
       "target": [
         "AppImage",
-        "deb"
+        "deb",
+        "rpm"
       ],
       "category": "Game",
       "maintainer": "zortos293 <zortos293@users.noreply.github.com>",
-      "artifactName": "OpenNOW-v${version}-linux-${arch}.${ext}"
+      "synopsis": "Open-source cloud gaming client",
+      "description": "OpenNOW is an open-source Electron-based client for cloud gaming services.",
+      "desktop": {
+        "entry": {
+          "MimeType": "x-scheme-handler/opennow;",
+          "StartupWMClass": "OpenNOW"
+        }
+      }
+    },
+    "rpm": {
+      "artifactName": "OpenNOW-v${version}-linux-${arch}.${ext}",
+      "packageName": "opennow",
+      "packageCategory": "Amusements/Games",
+      "compression": "xz",
+      "depends": [
+        "gtk3",
+        "libnotify",
+        "nss",
+        "libXScrnSaver",
+        "xdg-utils",
+        "at-spi2-core",
+        "libdrm",
+        "mesa-libGL",
+        "alsa-lib",
+        "cups-libs"
+      ],
+      "fpm": [
+        "--rpm-rpmbuild-define",
+        "_build_id_links none"
+      ]
     }
   }
 }
