@@ -1335,8 +1335,11 @@ export async function claimSession(input: SessionClaimRequest): Promise<SessionI
 
   const claimUrl = `https://${effectiveServerIp}/v2/session/${input.sessionId}?keyboardLayout=en-US&languageCode=${languageCode}`;
 
-  // Pre-claim validation: verify the session is still alive and in ready state before attempting claim
-  // This prevents sending a claim to an expired/dead session
+  // Pre-claim validation: check session status before deciding whether to send a RESUME claim.
+  // Status 1 (setup/launching/queuing) sessions cannot be RESUME'd — the server will reject
+  // with SESSION_NOT_PAUSED. For these sessions we skip the claim PUT and poll directly.
+  // Status 2/3 (ready/streaming) sessions are paused and can be RESUME'd normally.
+  let preClaimStatus: number | null = null;
   try {
     const validationUrl = `https://${effectiveServerIp}/v2/session/${input.sessionId}`;
     const validationHeaders = requestHeaders({ token: input.token, clientId, deviceId, includeOrigin: false });
@@ -1344,12 +1347,14 @@ export async function claimSession(input: SessionClaimRequest): Promise<SessionI
     if (validationResp.ok) {
       const validationText = await validationResp.text();
       const validationPayload = JSON.parse(validationText) as CloudMatchResponse;
-      const sessionStatus = validationPayload.session?.status ?? 0;
+      preClaimStatus = validationPayload.session?.status ?? 0;
       const errorCode = validationPayload.session?.errorCode ?? 0;
-      console.log(`[CloudMatch] claimSession: pre-claim validation status=${sessionStatus}, errorCode=${errorCode}`);
+      console.log(`[CloudMatch] claimSession: pre-claim validation status=${preClaimStatus}, errorCode=${errorCode}`);
       console.log(`[CloudMatch] claimSession: validation response (first 1000 chars): ${validationText.slice(0, 1000)}`);
-      if (sessionStatus !== 2 && sessionStatus !== 3) {
-        console.warn(`[CloudMatch] claimSession: session not in ready state (status=${sessionStatus}), claim may fail`);
+      if (preClaimStatus === 1) {
+        console.log(`[CloudMatch] claimSession: session is still launching (status=1), skipping RESUME claim — polling directly to ready state`);
+      } else if (preClaimStatus !== 2 && preClaimStatus !== 3) {
+        console.warn(`[CloudMatch] claimSession: session not in ready state (status=${preClaimStatus}), claim may fail`);
       }
     } else {
       console.warn(`[CloudMatch] claimSession: pre-claim validation returned HTTP ${validationResp.status}`);
@@ -1358,46 +1363,48 @@ export async function claimSession(input: SessionClaimRequest): Promise<SessionI
     console.warn("[CloudMatch] claimSession: pre-claim validation failed:", e);
   }
 
-  const payload = buildClaimRequestBody(input.sessionId, appId, settings);
+  // Only send the RESUME claim PUT if the session is in a paused state (status 2 or 3).
+  // For status=1 (still launching) we bypass the claim and fall through to the polling loop.
+  if (preClaimStatus !== 1) {
+    const payload = buildClaimRequestBody(input.sessionId, appId, settings);
 
-  const headers: Record<string, string> = {
-    "User-Agent": GFN_USER_AGENT,
-    Authorization: `GFNJWT ${input.token}`,
-    "Content-Type": "application/json",
-    Origin: "https://play.geforcenow.com",
-    Referer: "https://play.geforcenow.com/",
-    "nv-client-id": clientId,
-    "nv-client-streamer": "NVIDIA-CLASSIC",
-    "nv-client-type": "NATIVE",
-    "nv-client-version": GFN_CLIENT_VERSION,
-    "nv-device-os": process.platform === "win32" ? "WINDOWS" : process.platform === "darwin" ? "MACOS" : "LINUX",
-    "nv-device-type": "DESKTOP",
-    "x-device-id": deviceId,
-  };
+    const headers: Record<string, string> = {
+      "User-Agent": GFN_USER_AGENT,
+      Authorization: `GFNJWT ${input.token}`,
+      "Content-Type": "application/json",
+      Origin: "https://play.geforcenow.com",
+      Referer: "https://play.geforcenow.com/",
+      "nv-client-id": clientId,
+      "nv-client-streamer": "NVIDIA-CLASSIC",
+      "nv-client-type": "NATIVE",
+      "nv-client-version": GFN_CLIENT_VERSION,
+      "nv-device-os": process.platform === "win32" ? "WINDOWS" : process.platform === "darwin" ? "MACOS" : "LINUX",
+      "nv-device-type": "DESKTOP",
+      "x-device-id": deviceId,
+    };
 
-  // Send claim request
-  console.log(`[CloudMatch] claimSession PUT ${claimUrl}`);
-  console.log(`[CloudMatch] claimSession body: ${JSON.stringify(payload)}`);
-  const response = await fetch(claimUrl, {
-    method: "PUT",
-    headers,
-    body: JSON.stringify(payload),
-  });
+    console.log(`[CloudMatch] claimSession PUT ${claimUrl}`);
+    console.log(`[CloudMatch] claimSession body: ${JSON.stringify(payload)}`);
+    const response = await fetch(claimUrl, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify(payload),
+    });
 
-  const text = await response.text();
-  
-  // Log full response body for debugging (not truncated)
-  console.log(`[CloudMatch] claimSession response: HTTP ${response.status}`);
-  console.log(`[CloudMatch] claimSession response body FULL: ${text}`);
+    const text = await response.text();
 
-  if (!response.ok) {
-    throw SessionError.fromResponse(response.status, text);
-  }
+    console.log(`[CloudMatch] claimSession response: HTTP ${response.status}`);
+    console.log(`[CloudMatch] claimSession response body FULL: ${text}`);
 
-  const apiResponse = JSON.parse(text) as CloudMatchResponse;
+    if (!response.ok) {
+      throw SessionError.fromResponse(response.status, text);
+    }
 
-  if (apiResponse.requestStatus.statusCode !== 1) {
-    throw SessionError.fromResponse(200, text);
+    const apiResponse = JSON.parse(text) as CloudMatchResponse;
+
+    if (apiResponse.requestStatus.statusCode !== 1) {
+      throw SessionError.fromResponse(200, text);
+    }
   }
 
   // Poll until session is ready (status 2 or 3)
@@ -1409,10 +1416,7 @@ export async function claimSession(input: SessionClaimRequest): Promise<SessionI
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
 
-    // Build headers without Origin/Referer for polling
-    const pollHeaders: Record<string, string> = { ...headers };
-    delete pollHeaders["Origin"];
-    delete pollHeaders["Referer"];
+    const pollHeaders = requestHeaders({ token: input.token, clientId, deviceId, includeOrigin: false });
 
     const pollResponse = await fetch(getUrl, {
       method: "GET",

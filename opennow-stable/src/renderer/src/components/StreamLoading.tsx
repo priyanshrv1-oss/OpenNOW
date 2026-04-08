@@ -12,6 +12,7 @@ export interface StreamLoadingProps {
   queuePosition?: number;
   estimatedWait?: string;
   adState?: SessionAdState;
+  activeAdMediaUrl?: string;
   error?: {
     title: string;
     description: string;
@@ -38,9 +39,6 @@ function getStatusMessage(
   }
   if (adState?.isQueuePaused) {
     return "Session queue paused";
-  }
-  if (status === "queue" && adState?.isAdsRequired) {
-    return queuePosition ? `Watching ads to keep position #${queuePosition}` : "Watching ads to keep your place in queue";
   }
   switch (status) {
     case "queue":
@@ -93,6 +91,7 @@ export function StreamLoading({
   queuePosition,
   estimatedWait,
   adState,
+  activeAdMediaUrl,
   error,
   onAdPlaybackEvent,
   onCancel,
@@ -104,6 +103,7 @@ export function StreamLoading({
   const PlatformIcon = platformStore ? getStoreIconComponent(platformStore) : null;
   const adSummary = getAdSummary(adState);
   const activeAd = adState?.ads[0];
+  const cachedAdMediaUrl = activeAdMediaUrl ?? activeAd?.mediaUrl;
   const activeAdDurationSeconds = activeAd?.durationMs ? Math.round(activeAd.durationMs / 1000) : undefined;
 
   return (
@@ -176,7 +176,7 @@ export function StreamLoading({
           {hasError ? <XCircle size={28} className="sload-error-icon" /> : <Loader2 size={28} className="sload-spin" />}
           <div className="sload-status-text">
             <p className="sload-message">{statusMessage}</p>
-            {!hasError && activeAd?.mediaUrl && (
+            {!hasError && activeAd && cachedAdMediaUrl && (
               <div className={`sload-ad${adState?.isQueuePaused ? " sload-ad--paused" : ""}`}>
                 <div className="sload-ad-copy">
                   <span className="sload-ad-chip">Ad Queue</span>
@@ -189,7 +189,7 @@ export function StreamLoading({
                 </div>
                 <div className="sload-ad-media">
                   <QueueAdPreview
-                    mediaUrl={activeAd.mediaUrl}
+                    mediaUrl={cachedAdMediaUrl}
                     title={activeAd.title}
                     onPlaybackEvent={(event) => onAdPlaybackEvent?.(event, activeAd.adId)}
                   />
@@ -203,10 +203,9 @@ export function StreamLoading({
                 {error.code && <p className="sload-error-code">{error.code}</p>}
               </>
             )}
-            {status === "queue" && queuePosition !== undefined && queuePosition > 0 && (
+            {status === "queue" && estimatedWait && (
               <p className="sload-queue">
-                Position <span className="sload-queue-num">#{queuePosition}</span>
-                {estimatedWait && <span className="sload-wait"> · ~{estimatedWait}</span>}
+                <span className="sload-wait">~{estimatedWait}</span>
               </p>
             )}
           </div>

@@ -12,6 +12,7 @@ export interface ControllerStreamLoadingProps {
   status: "queue" | "setup" | "starting" | "connecting";
   queuePosition?: number;
   adState?: SessionAdState;
+  activeAdMediaUrl?: string;
   onAdPlaybackEvent?: (event: "playing" | "paused" | "ended", adId: string) => void;
   playtimeData?: PlaytimeStore;
   gameId?: string;
@@ -25,9 +26,6 @@ function getStatusMessage(
 ): string {
   if (adState?.isQueuePaused) {
     return "Session queue paused";
-  }
-  if (status === "queue" && adState?.isAdsRequired) {
-    return queuePosition ? `Watching ads to keep position #${queuePosition}` : "Watching ads to keep your place in queue";
   }
   switch (status) {
     case "queue":
@@ -66,6 +64,7 @@ export function ControllerStreamLoading({
   status,
   queuePosition,
   adState,
+  activeAdMediaUrl,
   onAdPlaybackEvent,
   playtimeData = {},
   gameId,
@@ -77,6 +76,7 @@ export function ControllerStreamLoading({
   const totalSecs = playtimeRecord?.totalSeconds ?? 0;
   const playtimeLabel = formatPlaytime(totalSecs);
   const activeAd = adState?.ads[0];
+  const cachedAdMediaUrl = activeAdMediaUrl ?? activeAd?.mediaUrl;
   const adDurationSeconds = activeAd?.durationMs ? Math.round(activeAd.durationMs / 1000) : undefined;
   const adMessage = adState?.message ?? (adState?.isQueuePaused ? "Resume ads to stay in queue." : undefined);
 
@@ -133,7 +133,7 @@ export function ControllerStreamLoading({
             <div className="csl-status-container">
               <div className="csl-status-message">{statusMessage}</div>
 
-              {activeAd?.mediaUrl && (
+              {activeAd && cachedAdMediaUrl && (
                 <div className={`csl-ad-panel${adState?.isQueuePaused ? " csl-ad-panel--paused" : ""}`}>
                   <div className="csl-ad-copy">
                     <span className="csl-ad-chip">Ad Queue</span>
@@ -148,7 +148,7 @@ export function ControllerStreamLoading({
                   </div>
                   <div className="csl-ad-media">
                     <QueueAdPreview
-                      mediaUrl={activeAd.mediaUrl}
+                      mediaUrl={cachedAdMediaUrl}
                       title={activeAd.title}
                       onPlaybackEvent={(event) => onAdPlaybackEvent?.(event, activeAd.adId)}
                     />

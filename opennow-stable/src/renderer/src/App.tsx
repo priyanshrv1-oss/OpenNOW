@@ -343,27 +343,6 @@ function getEffectiveAdState(
   };
 }
 
-/**
- * Extracts the `exp` Unix timestamp (seconds) from a JWT without verifying
- * the signature. Used to compute how much of the server-side ad token window
- * remains so the finish timer fires before the token expires regardless of
- * how long the previous ad took to complete.
- */
-function decodeAdTokenExp(jwt: string): number | null {
-  try {
-    const part = jwt.split(".")[1];
-    if (!part) {
-      return null;
-    }
-    // Base64url → base64 → binary string → JSON
-    const padded = part.replace(/-/g, "+").replace(/_/g, "/");
-    const payload = JSON.parse(atob(padded)) as Record<string, unknown>;
-    return typeof payload["exp"] === "number" ? (payload["exp"] as number) : null;
-  } catch {
-    return null;
-  }
-}
-
 function mergeAdState(
   previous: SessionAdState | undefined,
   next: SessionAdState | undefined,
@@ -793,6 +772,7 @@ export function App(): JSX.Element {
   const exitPromptResolverRef = useRef<((confirmed: boolean) => void) | null>(null);
   const adReportQueueRef = useRef<Promise<void>>(Promise.resolve());
   const adReportStateRef = useRef<Record<string, SessionAdAction>>({});
+  const adMediaUrlCacheRef = useRef<Record<string, string>>({});
   // Timer-driven finish timers keyed by adId. Each fires (durationMs − 3 s) after the
   // start PUT is ACKed, sending finish inside the server's per-ad token window even when
   // video buffering or load time extends total playback past adLengthInSeconds.
@@ -875,6 +855,7 @@ export function App(): JSX.Element {
   useEffect(() => {
     adReportStateRef.current = {};
     adReportQueueRef.current = Promise.resolve();
+    adMediaUrlCacheRef.current = {};
     // Clear any pending timer-driven finish callbacks when the session changes.
     Object.values(adFinishTimersRef.current).forEach(clearTimeout);
     adFinishTimersRef.current = {};
@@ -1006,38 +987,29 @@ export function App(): JSX.Element {
             return mergePolledSessionState(previous, updated);
           });
           setQueuePosition(updated.queuePosition);
+          const updatedAd = updated.adState?.ads.find((candidate) => candidate.adId === adId);
+          if (updatedAd?.mediaUrl) {
+            adMediaUrlCacheRef.current[adId] = updatedAd.mediaUrl;
+          }
 
-          // Timer management: ad tokens carry a fixed expiry window issued
-          // server-side at poll time, not when our start is received. We decode
-          // the JWT `exp` from the adId and fire finish at `exp - 4s` from now
-          // so the request arrives before the token closes regardless of how
-          // much window was consumed by prior ads or network latency.
+          // Schedule finish 1 second after start is ACKed.
           if (action === "start") {
-            const ackAd =
-              updated.adState?.ads.find((a) => a.adId === adId) ??
-              sessionRef.current?.adState?.ads.find((a) => a.adId === adId);
-            const durMs = ackAd?.durationMs;
-            if (durMs && durMs > 0) {
-              const existing = adFinishTimersRef.current[adId];
-              if (existing) clearTimeout(existing);
-              // Prefer JWT-based delay so we account for pre-issued token windows.
-              const jwtExp = decodeAdTokenExp(adId);
-              const delay = jwtExp
-                ? Math.max((jwtExp * 1000) - Date.now() - 4000, 500)
-                : Math.max(durMs - 3000, 1000);
-              console.log(`[QueueAds] Scheduling timer-driven finish for adId=${adId} in ${delay}ms (jwtExp=${jwtExp ?? "n/a"})`);
-              adFinishTimersRef.current[adId] = setTimeout(() => {
-                delete adFinishTimersRef.current[adId];
-                if (
-                  sessionRef.current?.sessionId === request.sessionId &&
-                  adReportStateRef.current[adId] === "start"
-                ) {
-                  console.log(`[QueueAds] Timer-driven finish firing for adId=${adId}`);
-                  adReportStateRef.current[adId] = "finish";
-                  reportQueueAdActionRef.current(adId, "finish");
-                }
-              }, delay);
+            const existing = adFinishTimersRef.current[adId];
+            if (existing) {
+              clearTimeout(existing);
             }
+            console.log(`[QueueAds] Scheduling finish for adId=${adId} in 1000ms`);
+            adFinishTimersRef.current[adId] = setTimeout(() => {
+              delete adFinishTimersRef.current[adId];
+              if (
+                sessionRef.current?.sessionId === request.sessionId &&
+                adReportStateRef.current[adId] === "start"
+              ) {
+                console.log(`[QueueAds] Timer finish firing for adId=${adId}`);
+                adReportStateRef.current[adId] = "finish";
+                reportQueueAdActionRef.current(adId, "finish");
+              }
+            }, 1000);
           } else if (action === "finish" || action === "cancel") {
             // Clear the timer if the video-event path already sent finish first.
             const t = adFinishTimersRef.current[adId];
@@ -1087,6 +1059,21 @@ export function App(): JSX.Element {
   useEffect(() => {
     reportQueueAdActionRef.current = reportQueueAdAction;
   }, [reportQueueAdAction]);
+
+  // Auto-acknowledge ads: as soon as an ad appears in session state, send start
+  // immediately then finish after 1 second, fully decoupled from video playback.
+  useEffect(() => {
+    const ads = session?.adState?.ads;
+    if (!ads || ads.length === 0) {
+      return;
+    }
+    for (const ad of ads) {
+      if (!adReportStateRef.current[ad.adId]) {
+        adReportStateRef.current[ad.adId] = "start";
+        reportQueueAdAction(ad.adId, "start");
+      }
+    }
+  }, [session, reportQueueAdAction]);
 
   const loadSubscriptionInfo = useCallback(
     async (session: AuthSession): Promise<void> => {
@@ -2062,8 +2049,11 @@ export function App(): JSX.Element {
       setQueuePosition(undefined);
       updateLoadingStep("connecting");
 
-      // Use the polled session data which has the latest signaling info
-      const sessionToConnect = sessionRef.current ?? finalSession ?? newSession;
+      // Use finalSession (the status=2 poll result) as the authoritative source for
+      // signaling coordinates — it carries the real server IP resolved at the moment
+      // the rig became ready. sessionRef.current may still hold stale zone-LB data
+      // from a prior React render cycle.
+      const sessionToConnect = finalSession ?? sessionRef.current ?? newSession;
       console.log("Connecting signaling with:", {
         sessionId: sessionToConnect.sessionId,
         signalingServer: sessionToConnect.signalingServer,
