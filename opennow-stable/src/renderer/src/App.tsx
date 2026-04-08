@@ -579,10 +579,10 @@ export function App(): JSX.Element {
   const [isResumingNavbarSession, setIsResumingNavbarSession] = useState(false);
   const [launchError, setLaunchError] = useState<LaunchErrorState | null>(null);
   const [sessionStartedAtMs, setSessionStartedAtMs] = useState<number | null>(null);
-  const [sessionElapsedSeconds, setSessionElapsedSeconds] = useState(0);
   const [streamWarning, setStreamWarning] = useState<StreamWarningState | null>(null);
 
   const { playtime, startSession: startPlaytimeSession, endSession: endPlaytimeSession } = usePlaytime();
+  const isStreaming = streamStatus === "streaming";
 
   const controllerOverlayOpenRef = useRef(false);
 
@@ -844,7 +844,6 @@ export function App(): JSX.Element {
     setStreamStatus("idle");
     setQueuePosition(undefined);
     setSessionStartedAtMs(null);
-    setSessionElapsedSeconds(0);
     setStreamWarning(null);
     setEscHoldReleaseIndicator({ visible: false, progress: 0 });
     diagnosticsStore.set(defaultDiagnostics());
@@ -1462,21 +1461,6 @@ export function App(): JSX.Element {
     }
   }, [currentPage, streamStatus]);
 
-  useEffect(() => {
-    if (streamStatus === "idle" || sessionStartedAtMs === null) {
-      setSessionElapsedSeconds(0);
-      return;
-    }
-
-    const updateElapsed = () => {
-      const elapsed = Math.max(0, Math.floor((Date.now() - sessionStartedAtMs) / 1000));
-      setSessionElapsedSeconds(elapsed);
-    };
-
-    updateElapsed();
-    const timer = window.setInterval(updateElapsed, 1000);
-    return () => window.clearInterval(timer);
-  }, [sessionStartedAtMs, streamStatus]);
 
   useEffect(() => {
     if (streamStatus !== "streaming" || sessionStartedAtMs !== null) {
@@ -1861,7 +1845,6 @@ export function App(): JSX.Element {
     };
 
     setSessionStartedAtMs(null);
-    setSessionElapsedSeconds(0);
     setStreamWarning(null);
     setLaunchError(null);
     const selectedVariantId = variantByGameId[game.id] ?? defaultVariantId(game);
@@ -2143,7 +2126,6 @@ export function App(): JSX.Element {
     setLaunchError(null);
     setQueuePosition(undefined);
     setSessionStartedAtMs(null);
-    setSessionElapsedSeconds(0);
     setStreamWarning(null);
     const matchedContext = findGameContextForSession(navbarActiveSession);
     if (matchedContext) {
@@ -2511,11 +2493,12 @@ export function App(): JSX.Element {
             antiAfkEnabled={antiAfkEnabled}
             escHoldReleaseIndicator={escHoldReleaseIndicator}
             exitPrompt={exitPrompt}
-            sessionElapsedSeconds={sessionElapsedSeconds}
+            sessionStartedAtMs={sessionStartedAtMs}
             sessionClockShowEveryMinutes={settings.sessionClockShowEveryMinutes}
             sessionClockShowDurationSeconds={settings.sessionClockShowDurationSeconds}
             streamWarning={streamWarning}
             isConnecting={streamStatus === "connecting"}
+            isStreaming={isStreaming}
             gameTitle={streamingGame?.title ?? "Game"}
             platformStore={streamingStore ?? undefined}
             onToggleFullscreen={() => {
@@ -2545,7 +2528,7 @@ export function App(): JSX.Element {
             onRecordingShortcutChange={(value) => {
               void updateSetting("shortcutToggleRecording", value);
             }}
-            remainingPlaytimeText={remainingPlaytimeText}
+            subscriptionInfo={subscriptionInfo}
             micTrack={clientRef.current?.getMicTrack() ?? null}
             onRequestPointerLock={handleRequestPointerLock}
             onReleasePointerLock={() => {
@@ -2620,9 +2603,10 @@ export function App(): JSX.Element {
               pendingSwitchGameCover={pendingSwitchGameCover}
               userName={authSession?.user.displayName}
               userAvatarUrl={authSession?.user.avatarUrl}
-              remainingPlaytimeText={remainingPlaytimeText}
+              subscriptionInfo={subscriptionInfo}
               playtimeData={playtime}
-              sessionElapsedSeconds={sessionElapsedSeconds}
+              sessionStartedAtMs={sessionStartedAtMs}
+              isStreaming={isStreaming}
               settings={{
                 resolution: settings.resolution,
                 fps: settings.fps,
@@ -2757,9 +2741,10 @@ export function App(): JSX.Element {
               pendingSwitchGameCover={pendingSwitchGameCover}
               userName={authSession?.user.displayName}
               userAvatarUrl={authSession?.user.avatarUrl}
-              remainingPlaytimeText={remainingPlaytimeText}
+              subscriptionInfo={subscriptionInfo}
               playtimeData={playtime}
-              sessionElapsedSeconds={sessionElapsedSeconds}
+              sessionStartedAtMs={sessionStartedAtMs}
+              isStreaming={isStreaming}
               settings={{
                 resolution: settings.resolution,
                 fps: settings.fps,
