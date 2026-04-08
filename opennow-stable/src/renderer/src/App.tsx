@@ -1897,8 +1897,12 @@ export function App(): JSX.Element {
         try {
           const activeSessions = await window.openNow.getActiveSessions(token, effectiveStreamingBaseUrl);
           if (activeSessions.length > 0) {
-            const matchingSession = activeSessions.find((entry) => entry.appId === numericAppId) ?? null;
-            const otherSession = activeSessions[0] ?? null;
+            // Only claim sessions that are already paused/ready (status 2 or 3).
+            // Status=1 sessions are still in queue/setup; sending a RESUME claim
+            // skips the queue/ad phase entirely. Let them fall through to
+            // createSession so the polling loop handles queue position and ads.
+            const matchingSession = activeSessions.find((entry) => entry.appId === numericAppId && (entry.status === 2 || entry.status === 3)) ?? null;
+            const otherSession = activeSessions.find((s) => s.status === 2 || s.status === 3) ?? null;
 
             if (matchingSession) {
               await claimAndConnectSession(matchingSession);

@@ -665,6 +665,13 @@ function registerIpcHandlers(): void {
      * Prefers a session whose appId matches the requested game; falls back to
      * any claimable session (serverIp present) if no exact match is found.
      * Returns null when no claimable session exists or the lookup fails.
+     *
+     * IMPORTANT: Only status=2/3 (ready/streaming) sessions are sent a RESUME claim PUT.
+     * Status=1 sessions (still in queue/setup) must NOT receive a RESUME — the server
+     * rejects it with SESSION_NOT_PAUSED, and even if we polled past it internally we
+     * would bypass the renderer's queue/ad polling loop entirely. Instead, status=1
+     * sessions are returned as a minimal SessionInfo so the renderer enters its own
+     * polling loop which shows queue position and ads correctly.
      */
     const tryClaimExisting = async (): Promise<SessionInfo | null> => {
       if (!token) return null;
@@ -672,22 +679,49 @@ function registerIpcHandlers(): void {
         const activeSessions = await getActiveSessions(token, streamingBaseUrl);
         if (activeSessions.length === 0) return null;
         const numericAppId = parseInt(payload.appId, 10);
-        const candidate =
-          activeSessions.find((s) => s.serverIp && s.appId === numericAppId) ??
-          activeSessions.find((s) => s.serverIp) ??
+
+        // First prefer a paused/ready session (status 2 or 3) that can be RESUME'd.
+        const readyCandidate =
+          activeSessions.find((s) => s.serverIp && s.appId === numericAppId && (s.status === 2 || s.status === 3)) ??
+          activeSessions.find((s) => s.serverIp && (s.status === 2 || s.status === 3)) ??
           null;
-        if (!candidate) return null;
-        console.log(
-          `[CreateSession] Resuming existing session (id=${candidate.sessionId}, appId=${candidate.appId}, status=${candidate.status}) instead of creating new.`,
-        );
-        return claimSession({
-          token,
-          streamingBaseUrl,
-          sessionId: candidate.sessionId,
-          serverIp: candidate.serverIp!,
-          appId: payload.appId,
-          settings: payload.settings,
-        });
+        if (readyCandidate) {
+          console.log(
+            `[CreateSession] Resuming existing session (id=${readyCandidate.sessionId}, appId=${readyCandidate.appId}, status=${readyCandidate.status}) instead of creating new.`,
+          );
+          return claimSession({
+            token,
+            streamingBaseUrl,
+            sessionId: readyCandidate.sessionId,
+            serverIp: readyCandidate.serverIp!,
+            appId: payload.appId,
+            settings: payload.settings,
+          });
+        }
+
+        // A status=1 session is still in queue/setup. Return it so the renderer's
+        // polling loop handles queue position and ads — do NOT send a RESUME claim.
+        const launchingCandidate =
+          activeSessions.find((s) => s.serverIp && s.appId === numericAppId && s.status === 1) ??
+          activeSessions.find((s) => s.serverIp && s.status === 1) ??
+          null;
+        if (launchingCandidate) {
+          console.log(
+            `[CreateSession] Found launching session (id=${launchingCandidate.sessionId}, appId=${launchingCandidate.appId}, status=1); returning for renderer queue/ad polling.`,
+          );
+          return {
+            sessionId: launchingCandidate.sessionId,
+            status: 1,
+            zone: "",
+            streamingBaseUrl,
+            serverIp: launchingCandidate.serverIp!,
+            signalingServer: launchingCandidate.serverIp!,
+            signalingUrl: launchingCandidate.signalingUrl ?? `wss://${launchingCandidate.serverIp}:443/nvst/`,
+            iceServers: [],
+          } satisfies SessionInfo;
+        }
+
+        return null;
       } catch (claimError) {
         console.warn("[CreateSession] Failed to claim existing session:", claimError);
         return null;
