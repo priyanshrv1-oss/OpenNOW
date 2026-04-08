@@ -10,6 +10,8 @@ dist/
 target/
 target2/
 target3/
+opennow-native-streamer/build*/
+opennow-native-streamer/vcpkg_installed/
 
 # IDE
 .idea/

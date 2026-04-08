@@ -1,0 +1,106 @@
+name: native-streamer-build
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "opennow-native-streamer/**"
+      - ".github/workflows/native-streamer-build.yml"
+  push:
+    branches:
+      - dev
+      - main
+    paths:
+      - "opennow-native-streamer/**"
+      - ".github/workflows/native-streamer-build.yml"
+
+concurrency:
+  group: native-streamer-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-native-streamer:
+    name: native-${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macos-arm64
+            os: macos-14
+            triplet: arm64-osx
+          - label: windows-x64
+            os: windows-2022
+            triplet: x64-windows
+
+    env:
+      VCPKG_DEFAULT_TRIPLET: ${{ matrix.triplet }}
+      VCPKG_FEATURE_FLAGS: manifests
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Ninja
+        uses: seanmiddleditch/gha-setup-ninja@v5
+
+      - name: Setup MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install macOS host tools
+        if: runner.os == 'macOS'
+        run: brew install pkg-config nasm
+
+      - name: Install Windows host tools
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: choco install nasm --no-progress -y
+
+      - name: Restore vcpkg cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/vcpkg
+            ${{ github.workspace }}/opennow-native-streamer/vcpkg_installed
+          key: native-vcpkg-${{ runner.os }}-${{ matrix.triplet }}-${{ hashFiles('opennow-native-streamer/vcpkg.json', 'opennow-native-streamer/CMakeLists.txt') }}
+          restore-keys: |
+            native-vcpkg-${{ runner.os }}-${{ matrix.triplet }}-
+
+      - name: Bootstrap vcpkg
+        shell: bash
+        run: |
+          if [ ! -d "$HOME/vcpkg/.git" ]; then
+            git clone https://github.com/microsoft/vcpkg.git "$HOME/vcpkg"
+          fi
+          cd "$HOME/vcpkg"
+          git fetch --depth=1 origin ffffe619563988cbcfda2b8db2c142654d12eaf5
+          git checkout --force ffffe619563988cbcfda2b8db2c142654d12eaf5
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            ./bootstrap-vcpkg.bat -disableMetrics
+          else
+            ./bootstrap-vcpkg.sh -disableMetrics
+          fi
+
+      - name: Configure native streamer
+        shell: bash
+        run: |
+          cmake \
+            -S opennow-native-streamer \
+            -B opennow-native-streamer/build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$HOME/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET="${VCPKG_DEFAULT_TRIPLET}"
+
+      - name: Build native streamer
+        run: cmake --build opennow-native-streamer/build --config Release
+
+      - name: Upload native build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: opennow-native-streamer-${{ matrix.label }}
+          path: |
+            opennow-native-streamer/build/opennow-native-streamer
+            opennow-native-streamer/build/Release/opennow-native-streamer.exe
+          if-no-files-found: error

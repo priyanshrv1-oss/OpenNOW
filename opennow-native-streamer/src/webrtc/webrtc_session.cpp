@@ -9,6 +9,7 @@
 #endif
 
 #include <algorithm>
+#include <cstddef>
 #include <sstream>
 
 namespace opennow::native {
@@ -51,6 +52,24 @@ std::string ParseAudioCodecName(const std::string& sdp, int* payload_type, int* 
 #if defined(OPENNOW_HAS_LIBDATACHANNEL)
 std::string ExtractLocalDescriptionSdp(const rtc::Description& description) {
   return std::string(description);
+}
+
+std::vector<std::uint8_t> BytesFromRtcBinary(const rtc::binary& data) {
+  std::vector<std::uint8_t> out;
+  out.reserve(data.size());
+  for (const auto byte : data) {
+    out.push_back(static_cast<std::uint8_t>(std::to_integer<unsigned int>(byte)));
+  }
+  return out;
+}
+
+rtc::binary RtcBinaryFromBytes(const std::vector<std::uint8_t>& data) {
+  rtc::binary out;
+  out.reserve(data.size());
+  for (const auto byte : data) {
+    out.push_back(static_cast<std::byte>(byte));
+  }
+  return out;
 }
 #endif
 
@@ -202,7 +221,7 @@ bool WebRtcSession::SendInputPacket(const InputPacket& packet) {
   if (!channel || !channel->isOpen()) {
     return false;
   }
-  return channel->send(packet.bytes.data(), packet.bytes.size());
+  return channel->send(RtcBinaryFromBytes(packet.bytes));
 #else
   (void)packet;
   return false;
@@ -344,11 +363,17 @@ void WebRtcSession::ConfigureInputChannels() {
   reliable_input_channel_->onOpen([this]() {
     input_ready_ = true;
     const std::vector<std::uint8_t> handshake = {0x0e, 0x02};
-    reliable_input_channel_->send(handshake.data(), handshake.size());
+    reliable_input_channel_->send(RtcBinaryFromBytes(handshake));
     EmitState("connecting", "Reliable input channel open");
   });
-  reliable_input_channel_->onMessage([this](rtc::binary bytes) {
-    HandleReliableInputMessage(std::vector<std::uint8_t>(bytes.begin(), bytes.end()));
+  reliable_input_channel_->onMessage([this](rtc::message_variant message) {
+    if (const auto* bytes = std::get_if<rtc::binary>(&message)) {
+      HandleReliableInputMessage(BytesFromRtcBinary(*bytes));
+      return;
+    }
+    if (const auto* text = std::get_if<std::string>(&message)) {
+      HandleReliableInputMessage(std::vector<std::uint8_t>(text->begin(), text->end()));
+    }
   });
 
   rtc::DataChannelInit partial{};
@@ -359,7 +384,7 @@ void WebRtcSession::ConfigureInputChannels() {
 }
 
 void WebRtcSession::ConfigureTrackHandlers() {
-#if defined(OPENNOW_HAS_LIBDATACHANNEL)
+#if defined(OPENNOW_HAS_LIBDATACHANNEL) && defined(OPENNOW_HAS_LIBDATACHANNEL_MEDIA)
   peer_connection_->onTrack([this](std::shared_ptr<rtc::Track> track) {
     const auto description = track->description();
     if (description.mid() == "video" || description.type() == "video") {
@@ -373,7 +398,7 @@ void WebRtcSession::ConfigureTrackHandlers() {
       track->onFrame([this](rtc::binary frame, rtc::FrameInfo info) {
         if (media_pipeline_) {
           const auto us = static_cast<std::uint64_t>(info.timestampSeconds ? info.timestampSeconds->count() * 1000000.0 : 0.0);
-          media_pipeline_->PushVideoFrame(std::vector<std::uint8_t>(frame.begin(), frame.end()), us);
+          media_pipeline_->PushVideoFrame(BytesFromRtcBinary(frame), us);
         }
       });
       return;
@@ -384,10 +409,12 @@ void WebRtcSession::ConfigureTrackHandlers() {
     track->onFrame([this](rtc::binary frame, rtc::FrameInfo info) {
       if (media_pipeline_) {
         const auto us = static_cast<std::uint64_t>(info.timestampSeconds ? info.timestampSeconds->count() * 1000000.0 : 0.0);
-        media_pipeline_->PushAudioFrame(std::vector<std::uint8_t>(frame.begin(), frame.end()), us);
+        media_pipeline_->PushAudioFrame(BytesFromRtcBinary(frame), us);
       }
     });
   });
+#elif defined(OPENNOW_HAS_LIBDATACHANNEL)
+  Log("libdatachannel media support is unavailable; native track receive handlers are disabled for this build");
 #endif
 }
 

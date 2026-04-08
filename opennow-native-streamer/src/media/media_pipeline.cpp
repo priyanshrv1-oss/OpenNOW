@@ -26,6 +26,9 @@ void MediaPipeline::SetLogger(LogFn logger) {
 
 bool MediaPipeline::Initialize(SDL_Renderer* renderer, std::string& error) {
   renderer_ = renderer;
+#if !defined(OPENNOW_HAS_SDL3) || !defined(OPENNOW_HAS_FFMPEG)
+  (void)error;
+#endif
 #if defined(OPENNOW_HAS_SDL3)
   SDL_AudioSpec desired{};
   desired.channels = 2;
@@ -285,7 +288,6 @@ void MediaPipeline::UploadFrame(AVFrame* frame) {
     Log(SDL_GetError());
     return;
   }
-  std::vector<std::uint8_t> lines(static_cast<std::size_t>(pitch * frame->height));
   std::uint8_t* dst_data[4] = {static_cast<std::uint8_t*>(pixels), nullptr, nullptr, nullptr};
   int dst_linesize[4] = {pitch, 0, 0, 0};
   sws_scale(sws_context_, frame->data, frame->linesize, 0, frame->height, dst_data, dst_linesize);

@@ -56,6 +56,12 @@ std::uint16_t ButtonFlag(SDL_GamepadButton button) {
   }
 }
 
+template <typename T>
+std::int16_t ClampToInt16(T value) {
+  const auto as_int = static_cast<int>(value);
+  return static_cast<std::int16_t>(std::clamp(as_int, -32768, 32767));
+}
+
 #endif
 }  // namespace
 
@@ -181,8 +187,8 @@ void InputBridge::HandleMouseMotion(const SDL_Event& event) {
     return;
   }
   MouseMovePacket packet{
-      .dx = static_cast<std::int16_t>(std::clamp(event.motion.xrel, -32768, 32767)),
-      .dy = static_cast<std::int16_t>(std::clamp(event.motion.yrel, -32768, 32767)),
+      .dx = ClampToInt16(event.motion.xrel),
+      .dy = ClampToInt16(event.motion.yrel),
       .timestamp_us = TimestampUs(static_cast<std::uint64_t>(event.motion.timestamp)),
   };
   Send({encoder_.EncodeMouseMove(packet), InputRoute::Reliable});
@@ -204,7 +210,7 @@ void InputBridge::HandleMouseWheel(const SDL_Event& event) {
     return;
   }
   MouseWheelPacket packet{
-      .delta = static_cast<std::int16_t>(std::clamp(-event.wheel.y * 120, -32768, 32767)),
+      .delta = ClampToInt16(-event.wheel.y * 120),
       .timestamp_us = TimestampUs(static_cast<std::uint64_t>(event.wheel.timestamp)),
   };
   Send({encoder_.EncodeMouseWheel(packet), InputRoute::Reliable});
