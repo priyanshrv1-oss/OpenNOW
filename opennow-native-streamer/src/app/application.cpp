@@ -119,7 +119,6 @@ int Application::Run() {
     SDL_RenderClear(renderer_);
     media_pipeline_.RenderFrame();
     SDL_RenderPresent(renderer_);
-    SDL_Delay(8);
   }
   return 0;
 #else

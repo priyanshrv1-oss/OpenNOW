@@ -11,6 +11,7 @@
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/frame.h>
+#include <libavutil/hwcontext.h>
 #include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
 }
@@ -22,16 +23,29 @@ extern "C" {
 struct SDL_Renderer;
 struct SDL_Texture;
 typedef void* SDL_AudioStream;
+using SDL_PixelFormat = std::uint32_t;
 #endif
 
 namespace opennow::native {
 
+enum class PendingVideoFormat {
+  NV12,
+  IYUV,
+  RGBA,
+};
+
 struct PendingVideoFrame {
-  std::vector<std::uint8_t> rgba;
+  PendingVideoFormat format = PendingVideoFormat::RGBA;
+  std::vector<std::uint8_t> plane0;
+  std::vector<std::uint8_t> plane1;
+  std::vector<std::uint8_t> plane2;
   int width = 0;
   int height = 0;
-  int stride = 0;
+  int pitch0 = 0;
+  int pitch1 = 0;
+  int pitch2 = 0;
   std::uint64_t timestamp_us = 0;
+  std::uint64_t staged_at_us = 0;
 };
 
 class MediaPipeline {
@@ -56,6 +70,8 @@ class MediaPipeline {
  private:
   void Log(const std::string& message) const;
   void ConfigureFfmpegLogging();
+  void LogVideoPath(const std::string& path);
+  void MaybeLogVideoDiagnostics(std::uint64_t now_us);
 
 #if defined(OPENNOW_HAS_SDL3) && defined(OPENNOW_HAS_FFMPEG)
   bool EnsureVideoDecoder(std::string& error);
@@ -64,6 +80,11 @@ class MediaPipeline {
   void DecodeAudioFrame(const std::vector<std::uint8_t>& encoded_frame);
   void StageFrame(::AVFrame* frame);
   void UploadPendingFrame(const PendingVideoFrame& frame);
+  bool StageFrameDirect(::AVFrame* frame);
+  void StageFrameRgba(::AVFrame* frame);
+  bool EnsureTransferFrame();
+  bool TryInitializeHardwareDecode(const ::AVCodec* codec, std::string& error);
+  static enum AVPixelFormat SelectHardwarePixelFormat(::AVCodecContext* context, const enum AVPixelFormat* pixel_formats);
 #endif
 
   LogFn logger_;
@@ -77,9 +98,20 @@ class MediaPipeline {
   int audio_payload_type_ = 111;
   int audio_clock_rate_ = 48000;
   int audio_channels_ = 2;
-  std::uint64_t rendered_frames_ = 0;
+  std::uint64_t received_video_frames_ = 0;
+  std::uint64_t staged_video_frames_ = 0;
+  std::uint64_t dropped_pending_video_frames_ = 0;
+  std::uint64_t presented_video_frames_ = 0;
+  std::uint64_t decode_time_total_us_ = 0;
+  std::uint64_t upload_time_total_us_ = 0;
+  std::uint64_t render_time_total_us_ = 0;
+  std::uint64_t last_diagnostics_log_us_ = 0;
+  std::uint64_t last_presented_at_us_ = 0;
   bool logged_stage_thread_ = false;
   bool logged_upload_thread_ = false;
+  bool logged_decoder_path_ = false;
+  bool using_hardware_decode_ = false;
+  std::string video_path_ = "video path: awaiting decoder initialization";
   mutable std::mutex pending_video_mutex_;
   std::optional<PendingVideoFrame> pending_video_frame_;
 #if defined(OPENNOW_HAS_SDL3) && defined(OPENNOW_HAS_FFMPEG)
@@ -87,11 +119,15 @@ class MediaPipeline {
   ::AVCodecContext* audio_decoder_ctx_ = nullptr;
   ::AVFrame* video_frame_ = nullptr;
   ::AVFrame* audio_frame_ = nullptr;
+  ::AVFrame* transfer_frame_ = nullptr;
   ::AVPacket* packet_ = nullptr;
   ::SwsContext* sws_context_ = nullptr;
   ::SwrContext* swr_context_ = nullptr;
+  ::AVBufferRef* hw_device_ctx_ = nullptr;
+  enum AVPixelFormat hw_pixel_format_ = AV_PIX_FMT_NONE;
   int texture_width_ = 0;
   int texture_height_ = 0;
+  SDL_PixelFormat texture_format_ = SDL_PIXELFORMAT_UNKNOWN;
 #endif
 };
 
