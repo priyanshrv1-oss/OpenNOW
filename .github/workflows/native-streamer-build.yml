@@ -57,7 +57,26 @@ jobs:
 
       - name: Install Linux host tools
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ninja-build pkg-config nasm
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build \
+            pkg-config \
+            nasm \
+            libwayland-dev \
+            wayland-protocols \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxfixes-dev \
+            libxrender-dev \
+            libxss-dev \
+            libxkbcommon-dev \
+            libdrm-dev \
+            libgbm-dev \
+            libegl1-mesa-dev
 
       - name: Install Windows host tools
         if: runner.os == 'Windows'

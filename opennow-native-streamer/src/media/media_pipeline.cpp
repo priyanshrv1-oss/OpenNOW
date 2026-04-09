@@ -103,7 +103,9 @@ bool MediaPipeline::Initialize(SDL_Window* window, SDL_Renderer* renderer, std::
   desired.freq = 48000;
   audio_stream_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &desired, nullptr, nullptr);
   if (!audio_stream_) {
-    error = SDL_GetError();
+    error = std::string("Failed to open SDL playback device using audio driver ") +
+            (SDL_GetCurrentAudioDriver() ? SDL_GetCurrentAudioDriver() : "<none>") + ": " + SDL_GetError();
+    Log(error);
     return false;
   }
   SDL_ResumeAudioStreamDevice(audio_stream_);

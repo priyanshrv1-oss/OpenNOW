@@ -1,7 +1,9 @@
 #include "opennow/native/app.hpp"
 
+#include <cstdlib>
 #include <iostream>
 #include <sstream>
+#include <vector>
 
 #include "opennow/native/platform_info.hpp"
 #include "opennow/native/protocol.hpp"
@@ -12,7 +14,53 @@ namespace {
 constexpr float kBaseDebugCharacterSize = 8.0f;
 constexpr float kBaseDebugPadding = 12.0f;
 constexpr float kBaseDebugLineHeight = 11.0f;
+
+[[maybe_unused]] std::string GetEnvOrEmpty(const char* name) {
+  const char* value = std::getenv(name);
+  return value ? value : "";
 }
+
+[[maybe_unused]] std::string JoinStrings(const std::vector<std::string>& values) {
+  std::ostringstream stream;
+  for (std::size_t index = 0; index < values.size(); ++index) {
+    if (index != 0) {
+      stream << ",";
+    }
+    stream << values[index];
+  }
+  return stream.str();
+}
+
+#if defined(OPENNOW_HAS_SDL3)
+std::string DescribeSdlDrivers(bool audio) {
+  std::vector<std::string> drivers;
+  const int count = audio ? SDL_GetNumAudioDrivers() : SDL_GetNumVideoDrivers();
+  for (int index = 0; index < count; ++index) {
+    const char* driver = audio ? SDL_GetAudioDriver(index) : SDL_GetVideoDriver(index);
+    if (driver && *driver) {
+      drivers.emplace_back(driver);
+    }
+  }
+  return drivers.empty() ? std::string("<none>") : JoinStrings(drivers);
+}
+
+std::string BuildPreferredLinuxVideoDriverList() {
+  std::vector<std::string> preferred;
+  if (!GetEnvOrEmpty("WAYLAND_DISPLAY").empty()) {
+    preferred.emplace_back("wayland");
+  }
+  if (!GetEnvOrEmpty("DISPLAY").empty()) {
+    preferred.emplace_back("x11");
+  }
+  preferred.emplace_back("kmsdrm");
+  return JoinStrings(preferred);
+}
+
+std::string BuildPreferredLinuxAudioDriverList() {
+  return "pipewire,pulseaudio,alsa";
+}
+#endif
+}  // namespace
 
 Application::Application(std::string ipc_host, int ipc_port, std::string session_id)
     : ipc_host_(std::move(ipc_host)), ipc_port_(ipc_port), session_id_(std::move(session_id)) {}
@@ -39,10 +87,28 @@ Application::~Application() {
 
 bool Application::Initialize(std::string& error) {
 #if defined(OPENNOW_HAS_SDL3)
+  std::cerr << "[OpenNOW Native Streamer] SDL video drivers available: " << DescribeSdlDrivers(false) << std::endl;
+  std::cerr << "[OpenNOW Native Streamer] SDL audio drivers available: " << DescribeSdlDrivers(true) << std::endl;
+#if defined(__linux__)
+  const auto preferred_video_drivers = BuildPreferredLinuxVideoDriverList();
+  if (!preferred_video_drivers.empty()) {
+    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, preferred_video_drivers.c_str());
+    std::cerr << "[OpenNOW Native Streamer] SDL preferred Linux video drivers: " << preferred_video_drivers
+              << " (WAYLAND_DISPLAY=" << (GetEnvOrEmpty("WAYLAND_DISPLAY").empty() ? "<unset>" : GetEnvOrEmpty("WAYLAND_DISPLAY"))
+              << ", DISPLAY=" << (GetEnvOrEmpty("DISPLAY").empty() ? "<unset>" : GetEnvOrEmpty("DISPLAY")) << ")" << std::endl;
+  }
+  const auto preferred_audio_drivers = BuildPreferredLinuxAudioDriverList();
+  SDL_SetHint(SDL_HINT_AUDIO_DRIVER, preferred_audio_drivers.c_str());
+  std::cerr << "[OpenNOW Native Streamer] SDL preferred Linux audio drivers: " << preferred_audio_drivers << std::endl;
+#endif
   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_AUDIO)) {
     error = SDL_GetError();
     return false;
   }
+  std::cerr << "[OpenNOW Native Streamer] SDL selected video driver: "
+            << (SDL_GetCurrentVideoDriver() ? SDL_GetCurrentVideoDriver() : "<none>") << std::endl;
+  std::cerr << "[OpenNOW Native Streamer] SDL selected audio driver: "
+            << (SDL_GetCurrentAudioDriver() ? SDL_GetCurrentAudioDriver() : "<none>") << std::endl;
 
   main_thread_event_type_ = SDL_RegisterEvents(1);
   if (main_thread_event_type_ == static_cast<std::uint32_t>(-1)) {

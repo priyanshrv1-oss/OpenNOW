@@ -132,6 +132,20 @@ sudo apt-get install -y \
   pkg-config \
   nasm \
   libsdl3-dev \
+  libwayland-dev \
+  wayland-protocols \
+  libx11-dev \
+  libxext-dev \
+  libxrandr-dev \
+  libxcursor-dev \
+  libxi-dev \
+  libxfixes-dev \
+  libxrender-dev \
+  libxss-dev \
+  libxkbcommon-dev \
+  libdrm-dev \
+  libgbm-dev \
+  libegl1-mesa-dev \
   libavcodec-dev \
   libavformat-dev \
   libavutil-dev \
@@ -160,6 +174,8 @@ cmake \
 cmake --build opennow-native-streamer/build --config Release
 ```
 
+Those desktop dependencies matter on Raspberry Pi OS because SDL3 only exposes `wayland`, `x11`, or `kmsdrm` video drivers if it was built with the corresponding Wayland/X11/DRM development packages available.
+
 Resulting binary:
 
 ```bash
@@ -178,6 +194,39 @@ The binary is normally launched by Electron main over loopback IPC. For a manual
 ```
 
 That only verifies process startup and window/runtime initialization. A real stream still requires the Electron app to create the session, own signaling, and connect to the native helper.
+
+On Raspberry Pi desktop sessions, the native app now prefers SDL backends in this order:
+
+1. `wayland` when `WAYLAND_DISPLAY` is set
+2. `x11` when `DISPLAY` is set
+3. `kmsdrm`
+
+`offscreen` should only be used for diagnostics, not normal streaming.
+
+At startup, the native binary prints:
+- available SDL video drivers compiled into the build
+- available SDL audio drivers
+- preferred Linux driver order selected by the app
+- the SDL video/audio driver actually chosen at runtime
+
+You can verify this directly:
+
+```bash
+./opennow-native-streamer/build/opennow-native-streamer \
+  --ipc-host=127.0.0.1 \
+  --ipc-port=9000 \
+  --session-id=pi-smoke-test 2>&1 | tee native-startup.log
+```
+
+Look for lines like:
+
+```text
+[OpenNOW Native Streamer] SDL video drivers available: wayland,x11,kmsdrm
+[OpenNOW Native Streamer] SDL selected video driver: wayland
+[OpenNOW Native Streamer] SDL selected audio driver: pipewire
+```
+
+If audio device initialization fails, the app now reports the active SDL audio backend in the error so Pi audio-stack issues are diagnosable from the terminal and from Electron-captured stderr.
 
 For end-to-end testing with the Electron shell, point OpenNOW at the built binary:
 
