@@ -100,7 +100,7 @@
       "desktop": {
         "entry": {
 		"MimeType": "x-scheme-handler/opennow;",
-        	"StartupWMClass": "OpenNOW"
+		"StartupWMClass": "OpenNOW"
       		}
 	}
     },
