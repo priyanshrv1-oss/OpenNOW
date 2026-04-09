@@ -43,6 +43,12 @@ bool Application::Initialize(std::string& error) {
     return false;
   }
 
+  main_thread_event_type_ = SDL_RegisterEvents(1);
+  if (main_thread_event_type_ == static_cast<std::uint32_t>(-1)) {
+    error = "Failed to register SDL main-thread event";
+    return false;
+  }
+
   window_ = SDL_CreateWindow("OpenNOW Native Streamer", 1280, 720, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
   if (!window_) {
     error = SDL_GetError();
@@ -80,7 +86,7 @@ bool Application::Initialize(std::string& error) {
   webrtc_session_.SetMediaPipeline(&media_pipeline_);
   webrtc_session_.SetInputReadyCallback([this](int protocol_version) {
     input_bridge_.OnInputReady(protocol_version);
-    SetStreamingActive(true);
+    QueueMainThreadAction(MainThreadAction::ActivateStream);
     EmitState("streaming", "Input channel ready", "protocol v" + std::to_string(protocol_version));
   });
   input_bridge_.SetSendPacket([this](InputPacket packet) {
@@ -102,6 +108,10 @@ int Application::Run() {
   while (running_) {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+      if (event.type == main_thread_event_type_) {
+        ProcessMainThreadAction(static_cast<MainThreadAction>(event.user.code));
+        continue;
+      }
       if (event.type == SDL_EVENT_QUIT) {
         SetStreamingActive(false);
         running_ = false;
@@ -177,7 +187,7 @@ void Application::HandleIncomingJson(const std::string& json) {
 
   if (*type == "signaling-disconnected") {
     const auto reason = FindJsonString(json, "reason");
-    SetStreamingActive(false);
+    QueueMainThreadAction(MainThreadAction::DeactivateStream);
     EmitLog(std::string("Electron main reported signaling disconnected: ") + (reason ? *reason : std::string("<no-reason>")));
     EmitState("failed", "Signaling disconnected", reason.value_or("socket closed"));
     return;
@@ -185,17 +195,52 @@ void Application::HandleIncomingJson(const std::string& json) {
 
   if (*type == "signaling-error") {
     const auto message = FindJsonString(json, "message");
-    SetStreamingActive(false);
+    QueueMainThreadAction(MainThreadAction::DeactivateStream);
     EmitLog(std::string("Electron main reported signaling error: ") + (message ? *message : std::string("<no-message>")));
     EmitState("failed", "Signaling error", message.value_or("unknown signaling error"));
     return;
   }
 
   if (*type == "disconnect") {
-    running_ = false;
-    SetStreamingActive(false);
-    webrtc_session_.Disconnect();
+    QueueMainThreadAction(MainThreadAction::Disconnect);
     EmitState("exited", "Disconnect requested by Electron shell");
+  }
+}
+
+void Application::QueueMainThreadAction(MainThreadAction action) {
+#if defined(OPENNOW_HAS_SDL3)
+  if (main_thread_event_type_ == 0) {
+    ProcessMainThreadAction(action);
+    return;
+  }
+
+  SDL_Event event{};
+  event.type = main_thread_event_type_;
+  event.user.code = static_cast<Sint32>(action);
+  if (!SDL_PushEvent(&event)) {
+    EmitLog("Failed to marshal native window action onto SDL thread");
+    ProcessMainThreadAction(action);
+    return;
+  }
+  EmitLog("Marshaled native window action onto SDL thread");
+#else
+  (void)action;
+#endif
+}
+
+void Application::ProcessMainThreadAction(MainThreadAction action) {
+  switch (action) {
+    case MainThreadAction::ActivateStream:
+      SetStreamingActive(true);
+      break;
+    case MainThreadAction::DeactivateStream:
+      SetStreamingActive(false);
+      break;
+    case MainThreadAction::Disconnect:
+      SetStreamingActive(false);
+      running_ = false;
+      webrtc_session_.Disconnect();
+      break;
   }
 }
 

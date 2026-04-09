@@ -26,7 +26,15 @@ class Application {
   int Run();
 
  private:
+  enum class MainThreadAction {
+    ActivateStream,
+    DeactivateStream,
+    Disconnect,
+  };
+
   void HandleIncomingJson(const std::string& json);
+  void QueueMainThreadAction(MainThreadAction action);
+  void ProcessMainThreadAction(MainThreadAction action);
   void EmitState(const std::string& state, const std::string& message, const std::string& detail = "");
   void EmitLog(const std::string& message);
   void EmitInput(InputPacket packet);
@@ -40,6 +48,7 @@ class Application {
   std::string session_id_;
   SDL_Window* window_{nullptr};
   SDL_Renderer* renderer_{nullptr};
+  std::uint32_t main_thread_event_type_{0};
   bool running_{false};
   bool stream_active_{false};
   bool fullscreen_enabled_{false};
