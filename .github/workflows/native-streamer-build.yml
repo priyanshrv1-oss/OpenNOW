@@ -41,21 +41,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Ninja
-        uses: seanmiddleditch/gha-setup-ninja@v5
-
       - name: Setup MSVC
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Install macOS host tools
         if: runner.os == 'macOS'
-        run: brew install pkg-config nasm
+        run: brew install ninja pkg-config nasm
 
       - name: Install Windows host tools
         if: runner.os == 'Windows'
         shell: powershell
-        run: choco install nasm --no-progress -y
+        run: choco install ninja nasm --no-progress -y
 
       - name: Restore vcpkg cache
         uses: actions/cache@v4
