@@ -142,10 +142,15 @@ sudo apt-get install -y \
   libxfixes-dev \
   libxrender-dev \
   libxss-dev \
+  libxtst-dev \
   libxkbcommon-dev \
   libdrm-dev \
   libgbm-dev \
   libegl1-mesa-dev \
+  libasound2-dev \
+  libpulse-dev \
+  libpipewire-0.3-dev \
+  libjack-jackd2-dev \
   libavcodec-dev \
   libavformat-dev \
   libavutil-dev \
@@ -174,7 +179,15 @@ cmake \
 cmake --build opennow-native-streamer/build --config Release
 ```
 
-Those desktop dependencies matter on Raspberry Pi OS because SDL3 only exposes `wayland`, `x11`, or `kmsdrm` video drivers if it was built with the corresponding Wayland/X11/DRM development packages available.
+Those desktop/audio dependencies matter on Raspberry Pi OS because SDL3 only exposes `wayland`, `x11`, or `kmsdrm` video drivers and first-class Linux audio backends if it was built with the corresponding development packages available. In particular:
+
+- `libxtst-dev` is required for a full X11-capable SDL3 build on Ubuntu arm64
+- `libasound2-dev` provides ALSA support
+- `libpulse-dev` provides PulseAudio support
+- `libpipewire-0.3-dev` provides PipeWire support
+- `libjack-jackd2-dev` enables JACK where available
+
+For Raspberry Pi desktop usage, ALSA/Pulse/PipeWire should be considered first-class backends, not optional afterthoughts.
 
 Resulting binary:
 
@@ -227,6 +240,8 @@ Look for lines like:
 ```
 
 If audio device initialization fails, the app now reports the active SDL audio backend in the error so Pi audio-stack issues are diagnosable from the terminal and from Electron-captured stderr.
+
+If your local Pi build does not list `wayland`/`x11`/`kmsdrm` in the available SDL video drivers, or does not list `alsa`/`pulseaudio`/`pipewire` in the available audio drivers, rebuild SDL3 after installing the development packages above. A binary built without those dependencies will not magically gain the missing backends at runtime.
 
 For end-to-end testing with the Electron shell, point OpenNOW at the built binary:
 

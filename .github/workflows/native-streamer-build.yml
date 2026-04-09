@@ -73,10 +73,15 @@ jobs:
             libxfixes-dev \
             libxrender-dev \
             libxss-dev \
+            libxtst-dev \
             libxkbcommon-dev \
             libdrm-dev \
             libgbm-dev \
-            libegl1-mesa-dev
+            libegl1-mesa-dev \
+            libasound2-dev \
+            libpulse-dev \
+            libpipewire-0.3-dev \
+            libjack-jackd2-dev
 
       - name: Install Windows host tools
         if: runner.os == 'Windows'
