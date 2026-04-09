@@ -117,6 +117,7 @@ class MediaPipeline {
   std::uint64_t received_video_frames_ = 0;
   std::uint64_t staged_video_frames_ = 0;
   std::uint64_t dropped_pending_video_frames_ = 0;
+  std::uint64_t dropped_catchup_video_frames_ = 0;
   std::uint64_t presented_video_frames_ = 0;
   std::uint64_t decode_time_total_us_ = 0;
   std::uint64_t upload_time_total_us_ = 0;

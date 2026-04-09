@@ -27,6 +27,7 @@ namespace {
 std::mutex g_ffmpeg_log_mutex;
 bool g_suppressed_deprecated_pixel_format_warning = false;
 constexpr std::size_t kMaxPendingVideoFrames = 3;
+constexpr std::size_t kTargetPendingVideoFrames = 0;
 
 void OpenNowFfmpegLogCallback(void* avcl, int level, const char* fmt, va_list args) {
   if (fmt != nullptr && std::strstr(fmt, "deprecated pixel format used") != nullptr) {
@@ -183,14 +184,21 @@ void MediaPipeline::RenderFrame() {
 #if defined(OPENNOW_HAS_SDL3)
   const auto render_started_at_us = TimestampUs();
   std::optional<PendingVideoFrame> pending_frame;
+  std::size_t pending_queue_depth = 0;
   {
     std::lock_guard<std::mutex> lock(pending_video_mutex_);
+    while (pending_video_frames_.size() > kTargetPendingVideoFrames + 1) {
+      pending_video_frames_.pop_front();
+      dropped_pending_video_frames_ += 1;
+      dropped_catchup_video_frames_ += 1;
+    }
     if (!pending_video_frames_.empty()) {
       pending_frame = std::move(pending_video_frames_.front());
       pending_video_frames_.pop_front();
-      queue_depth_total_ += pending_video_frames_.size();
-      queue_depth_samples_ += 1;
     }
+    pending_queue_depth = pending_video_frames_.size();
+    queue_depth_total_ += pending_queue_depth;
+    queue_depth_samples_ += 1;
   }
   if (pending_frame) {
     UploadPendingFrame(*pending_frame);
@@ -262,7 +270,8 @@ void MediaPipeline::MaybeLogVideoDiagnostics(std::uint64_t now_us) {
   }
   std::ostringstream diagnostics;
   diagnostics << "Video diagnostics: received=" << received_video_frames_ << ", staged=" << staged_video_frames_
-              << ", dropped_pending=" << dropped_pending_video_frames_ << ", presented=" << presented_video_frames_;
+              << ", dropped_pending=" << dropped_pending_video_frames_ << ", dropped_catchup=" << dropped_catchup_video_frames_
+              << ", presented=" << presented_video_frames_;
   {
     std::lock_guard<std::mutex> lock(pending_video_mutex_);
     diagnostics << ", pending_queue=" << pending_video_frames_.size();
