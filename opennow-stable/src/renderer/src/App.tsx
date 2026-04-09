@@ -2941,13 +2941,22 @@ export function App(): JSX.Element {
       ? Math.floor(sessionElapsedSeconds / 60) / 60
       : 0;
   const remainingPlaytimeText = formatRemainingPlaytimeFromSubscription(subscriptionInfo, consumedHours);
+  const shouldRenderStreamView = streamStatus !== "idle";
+  const shouldRenderControllerLaunchOverlay =
+    !isSwitchingGame
+    && settings.controllerMode
+    && (launchError !== null || (streamStatus !== "idle" && streamStatus !== "streaming" && streamStatus !== "connecting"));
+  const shouldRenderDesktopLaunchOverlay =
+    !isSwitchingGame
+    && !settings.controllerMode
+    && (launchError !== null || (streamStatus !== "idle" && streamStatus !== "streaming"));
 
   // Show stream lifecycle (waiting/connecting/streaming/failure)
   if (showLaunchOverlay) {
     const loadingStatus = launchError ? launchError.stage : toLoadingStatus(streamStatus);
     return (
       <>
-        {streamStatus !== "idle" && (
+        {shouldRenderStreamView && (
           <StreamView
             className={isSwitchingGame ? "sv--switching" : undefined}
             videoRef={videoRef}
@@ -3119,7 +3128,7 @@ export function App(): JSX.Element {
             />
           </div>
         )}
-        {streamStatus !== "idle" && streamStatus !== "streaming" && streamStatus !== "connecting" && settings.controllerMode && !isSwitchingGame && (
+        {shouldRenderControllerLaunchOverlay && (
           <ControllerStreamLoading
             gameTitle={streamingGame?.title ?? "Game"}
             gamePoster={streamingGame?.imageUrl}
@@ -3145,7 +3154,7 @@ export function App(): JSX.Element {
             enableBackgroundAnimations={settings.controllerBackgroundAnimations}
           />
         )}
-        {streamStatus !== "idle" && streamStatus !== "streaming" && !settings.controllerMode && !isSwitchingGame && (
+        {shouldRenderDesktopLaunchOverlay && (
           <StreamLoading
             gameTitle={streamingGame?.title ?? "Game"}
             gameCover={streamingGame?.imageUrl}
