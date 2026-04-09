@@ -27,7 +27,8 @@ namespace {
 std::mutex g_ffmpeg_log_mutex;
 bool g_suppressed_deprecated_pixel_format_warning = false;
 constexpr std::size_t kMaxPendingVideoFrames = 3;
-constexpr std::size_t kTargetPendingVideoFrames = 0;
+constexpr std::size_t kTargetBufferedVideoFrames = 1;
+constexpr std::uint64_t kMaxSingleBufferedFrameAgeUs = 20000;
 
 void OpenNowFfmpegLogCallback(void* avcl, int level, const char* fmt, va_list args) {
   if (fmt != nullptr && std::strstr(fmt, "deprecated pixel format used") != nullptr) {
@@ -187,12 +188,16 @@ void MediaPipeline::RenderFrame() {
   std::size_t pending_queue_depth = 0;
   {
     std::lock_guard<std::mutex> lock(pending_video_mutex_);
-    while (pending_video_frames_.size() > kTargetPendingVideoFrames + 1) {
+    while (pending_video_frames_.size() > kTargetBufferedVideoFrames + 1) {
       pending_video_frames_.pop_front();
       dropped_pending_video_frames_ += 1;
       dropped_catchup_video_frames_ += 1;
     }
-    if (!pending_video_frames_.empty()) {
+    const bool should_upload_next_frame = !pending_video_frames_.empty() &&
+                                          (!video_texture_ || pending_video_frames_.size() > kTargetBufferedVideoFrames ||
+                                           (render_started_at_us - pending_video_frames_.front().staged_at_us) >=
+                                               kMaxSingleBufferedFrameAgeUs);
+    if (should_upload_next_frame) {
       pending_frame = std::move(pending_video_frames_.front());
       pending_video_frames_.pop_front();
     }
@@ -200,16 +205,22 @@ void MediaPipeline::RenderFrame() {
     queue_depth_total_ += pending_queue_depth;
     queue_depth_samples_ += 1;
   }
+  bool uploaded_new_frame = false;
   if (pending_frame) {
-    UploadPendingFrame(*pending_frame);
+    uploaded_new_frame = UploadPendingFrame(*pending_frame);
   }
   if (video_texture_ && renderer_) {
     SDL_RenderTexture(renderer_, video_texture_, nullptr, nullptr);
-    presented_video_frames_ += 1;
-    last_presented_at_us_ = TimestampUs();
+    const auto presented_at_us = TimestampUs();
+    if (uploaded_new_frame) {
+      presented_video_frames_ += 1;
+      last_presented_at_us_ = presented_at_us;
+    } else {
+      duplicate_present_cycles_ += 1;
+    }
   }
   render_time_total_us_ += TimestampUs() - render_started_at_us;
-  MaybeLogVideoDiagnostics(last_presented_at_us_ == 0 ? render_started_at_us : last_presented_at_us_);
+  MaybeLogVideoDiagnostics(render_started_at_us);
 #endif
 }
 
@@ -270,8 +281,9 @@ void MediaPipeline::MaybeLogVideoDiagnostics(std::uint64_t now_us) {
   }
   std::ostringstream diagnostics;
   diagnostics << "Video diagnostics: received=" << received_video_frames_ << ", staged=" << staged_video_frames_
-              << ", dropped_pending=" << dropped_pending_video_frames_ << ", dropped_catchup=" << dropped_catchup_video_frames_
-              << ", presented=" << presented_video_frames_;
+              << ", uploaded=" << uploaded_video_frames_ << ", presented_unique=" << presented_video_frames_
+              << ", presented_duplicate=" << duplicate_present_cycles_ << ", dropped_pending=" << dropped_pending_video_frames_
+              << ", dropped_catchup=" << dropped_catchup_video_frames_;
   {
     std::lock_guard<std::mutex> lock(pending_video_mutex_);
     diagnostics << ", pending_queue=" << pending_video_frames_.size();
@@ -283,9 +295,12 @@ void MediaPipeline::MaybeLogVideoDiagnostics(std::uint64_t now_us) {
   if (staged_video_frames_ != 0) {
     diagnostics << ", avg_decode_ms=" << (static_cast<double>(decode_time_total_us_) / 1000.0 / static_cast<double>(staged_video_frames_));
   }
-  if (presented_video_frames_ != 0) {
-    diagnostics << ", avg_upload_ms=" << (static_cast<double>(upload_time_total_us_) / 1000.0 / static_cast<double>(presented_video_frames_));
-    diagnostics << ", avg_render_ms=" << (static_cast<double>(render_time_total_us_) / 1000.0 / static_cast<double>(presented_video_frames_));
+  if (uploaded_video_frames_ != 0) {
+    diagnostics << ", avg_upload_ms=" << (static_cast<double>(upload_time_total_us_) / 1000.0 / static_cast<double>(uploaded_video_frames_));
+  }
+  if (presented_video_frames_ != 0 || duplicate_present_cycles_ != 0) {
+    const auto render_cycles = presented_video_frames_ + duplicate_present_cycles_;
+    diagnostics << ", avg_render_ms=" << (static_cast<double>(render_time_total_us_) / 1000.0 / static_cast<double>(render_cycles));
   }
   diagnostics << ", path=" << video_path_;
   Log(diagnostics.str());
@@ -671,9 +686,9 @@ std::optional<PendingVideoFrame> MediaPipeline::ConvertPendingFrameToRgba(const 
   return rgba_frame;
 }
 
-void MediaPipeline::UploadPendingFrame(const PendingVideoFrame& frame) {
+bool MediaPipeline::UploadPendingFrame(const PendingVideoFrame& frame) {
   if (!renderer_) {
-    return;
+    return false;
   }
   const auto upload_started_at_us = TimestampUs();
   SDL_PixelFormat desired_format = SDL_PIXELFORMAT_RGBA32;
@@ -700,16 +715,15 @@ void MediaPipeline::UploadPendingFrame(const PendingVideoFrame& frame) {
         texture_format_ = SDL_PIXELFORMAT_UNKNOWN;
         auto rgba_frame = ConvertPendingFrameToRgba(frame);
         if (rgba_frame) {
-          UploadPendingFrame(*rgba_frame);
-          return;
+          return UploadPendingFrame(*rgba_frame);
         }
         Log("Failed to convert YUV frame into RGBA fallback after SDL texture creation failure");
-        return;
+        return false;
       }
       std::ostringstream fallback;
       fallback << "Failed to create SDL texture for format " << static_cast<std::uint32_t>(desired_format) << ": " << creation_error;
       Log(fallback.str());
-      return;
+      return false;
     }
     Log("Created/updated SDL video texture on render thread");
   }
@@ -734,17 +748,17 @@ void MediaPipeline::UploadPendingFrame(const PendingVideoFrame& frame) {
       texture_format_ = SDL_PIXELFORMAT_UNKNOWN;
       auto rgba_frame = ConvertPendingFrameToRgba(frame);
       if (rgba_frame) {
-        UploadPendingFrame(*rgba_frame);
-        return;
+        return UploadPendingFrame(*rgba_frame);
       }
       Log("Failed to convert YUV frame into RGBA fallback after SDL upload failure");
-      return;
+      return false;
     }
     Log(upload_error);
-    return;
+    return false;
   }
   upload_time_total_us_ += TimestampUs() - upload_started_at_us;
   const auto now_us = TimestampUs();
+  uploaded_video_frames_ += 1;
   if (fps_window_started_us_ == 0) {
     fps_window_started_us_ = now_us;
     fps_window_frames_ = 0;
@@ -761,6 +775,7 @@ void MediaPipeline::UploadPendingFrame(const PendingVideoFrame& frame) {
     logged_upload_thread_ = true;
     Log("Uploaded staged video frames on render thread");
   }
+  return true;
 }
 #endif
 

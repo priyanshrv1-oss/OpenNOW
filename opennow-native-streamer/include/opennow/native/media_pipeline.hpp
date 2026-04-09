@@ -94,7 +94,7 @@ class MediaPipeline {
   void DecodeVideoFrame(const std::vector<std::uint8_t>& encoded_frame);
   void DecodeAudioFrame(const std::vector<std::uint8_t>& encoded_frame);
   void StageFrame(::AVFrame* frame);
-  void UploadPendingFrame(const PendingVideoFrame& frame);
+  bool UploadPendingFrame(const PendingVideoFrame& frame);
   bool StageFrameDirect(::AVFrame* frame);
   void StageFrameRgba(::AVFrame* frame);
   std::optional<PendingVideoFrame> ConvertPendingFrameToRgba(const PendingVideoFrame& frame);
@@ -116,9 +116,11 @@ class MediaPipeline {
   int audio_channels_ = 2;
   std::uint64_t received_video_frames_ = 0;
   std::uint64_t staged_video_frames_ = 0;
+  std::uint64_t uploaded_video_frames_ = 0;
   std::uint64_t dropped_pending_video_frames_ = 0;
   std::uint64_t dropped_catchup_video_frames_ = 0;
   std::uint64_t presented_video_frames_ = 0;
+  std::uint64_t duplicate_present_cycles_ = 0;
   std::uint64_t decode_time_total_us_ = 0;
   std::uint64_t upload_time_total_us_ = 0;
   std::uint64_t render_time_total_us_ = 0;
