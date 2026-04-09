@@ -96,13 +96,7 @@
       "maintainer": "zortos293 <zortos293@users.noreply.github.com>",
       "artifactName": "OpenNOW-v${version}-linux-${arch}.${ext}",
       "synopsis": "Open-source cloud gaming client",
-      "description": "OpenNOW is an open-source Electron-based client for cloud gaming services.",
-      "desktop": {
-        "entry": {
-		"MimeType": "x-scheme-handler/opennow;",
-		"StartupWMClass": "OpenNOW"
-      		}
-	}
+      "description": "OpenNOW is an open-source Electron-based client for cloud gaming services."
     },
     "rpm": {
       "packageName": "opennow",
