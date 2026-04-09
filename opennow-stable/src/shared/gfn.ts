@@ -146,6 +146,7 @@ export interface Settings {
   microphoneMode: MicrophoneMode;
   microphoneDeviceId: string;
   hideStreamButtons: boolean;
+  showStatsOnLaunch: boolean;
   controllerMode: boolean;
   controllerUiSounds: boolean;
   autoLoadControllerLibrary: boolean;
