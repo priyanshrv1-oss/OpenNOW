@@ -19,6 +19,7 @@ export const IPC_CHANNELS = {
   SESSION_CONFLICT_DIALOG: "gfn:session-conflict-dialog",
   CONNECT_SIGNALING: "gfn:connect-signaling",
   DISCONNECT_SIGNALING: "gfn:disconnect-signaling",
+  MARK_SIGNALING_ESTABLISHED: "gfn:mark-signaling-established",
   SEND_ANSWER: "gfn:send-answer",
   SEND_ICE_CANDIDATE: "gfn:send-ice-candidate",
   REQUEST_KEYFRAME: "gfn:request-keyframe",

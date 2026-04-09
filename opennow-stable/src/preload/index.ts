@@ -15,6 +15,7 @@ import type {
   SessionStopRequest,
   SessionClaimRequest,
   SignalingConnectRequest,
+  SignalingEstablishedRequest,
   SendAnswerRequest,
   IceCandidatePayload,
   KeyframeRequest,
@@ -59,6 +60,8 @@ const api: OpenNowApi = {
   connectSignaling: (input: SignalingConnectRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.CONNECT_SIGNALING, input),
   disconnectSignaling: () => ipcRenderer.invoke(IPC_CHANNELS.DISCONNECT_SIGNALING),
+  markSignalingEstablished: (input: SignalingEstablishedRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MARK_SIGNALING_ESTABLISHED, input),
   sendAnswer: (input: SendAnswerRequest) => ipcRenderer.invoke(IPC_CHANNELS.SEND_ANSWER, input),
   sendIceCandidate: (input: IceCandidatePayload) =>
     ipcRenderer.invoke(IPC_CHANNELS.SEND_ICE_CANDIDATE, input),

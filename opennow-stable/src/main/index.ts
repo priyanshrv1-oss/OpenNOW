@@ -37,6 +37,7 @@ import type {
   SessionStopRequest,
   SessionClaimRequest,
   SignalingConnectRequest,
+  SignalingEstablishedRequest,
   SendAnswerRequest,
   IceCandidatePayload,
   KeyframeRequest,
@@ -853,6 +854,10 @@ function registerIpcHandlers(): void {
     signalingClient?.disconnect();
     signalingClient = null;
     signalingClientKey = null;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MARK_SIGNALING_ESTABLISHED, async (_event, payload: SignalingEstablishedRequest): Promise<void> => {
+    signalingClient?.markEstablished(payload.reason);
   });
 
   ipcMain.handle(IPC_CHANNELS.SEND_ANSWER, async (_event, payload: SendAnswerRequest) => {

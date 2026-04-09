@@ -8,6 +8,7 @@ import type {
   MainToRendererSignalingEvent,
   SendAnswerRequest,
   SignalingDisconnectInfo,
+  SignalingEstablishedRequest,
   SignalingSessionPhase,
 } from "@shared/gfn";
 
@@ -71,6 +72,7 @@ export class GfnSignalingClient {
   private lastMessageAt = 0;
   private queuedOutbound: OutboundEnvelope[] = [];
   private unackedOutbound = new Map<number, OutboundEnvelope>();
+  private establishmentReason: SignalingEstablishedRequest["reason"] | null = null;
 
   constructor(
     private readonly signalingServer: string,
@@ -173,7 +175,7 @@ export class GfnSignalingClient {
   }
 
   private describeState(): string {
-    return `gen=${this.socketGeneration} attempt=${this.reconnectAttempt} phase=${this.sessionPhase} lastInAck=${this.lastInboundAckId} lastOutAck=${this.nextOutboundAckId} queued=${this.queuedOutbound.length} unacked=${this.unackedOutbound.size}`;
+    return `gen=${this.socketGeneration} attempt=${this.reconnectAttempt} phase=${this.sessionPhase} establishedBy=${this.establishmentReason ?? "none"} lastInAck=${this.lastInboundAckId} lastOutAck=${this.nextOutboundAckId} queued=${this.queuedOutbound.length} unacked=${this.unackedOutbound.size}`;
   }
 
   private describeOutboundList(items: OutboundEnvelope[]): string {
@@ -189,6 +191,10 @@ export class GfnSignalingClient {
     }
     this.ws.send(JSON.stringify(payload));
     return true;
+  }
+
+  private shouldQueueWhenOffline(): boolean {
+    return !this.hasEverOpened || this.sessionPhase === "sign-in" || this.reconnectTimer !== null;
   }
 
   private flushQueuedOutbound(skipAckIdsInReplayStore = false): void {
@@ -235,6 +241,11 @@ export class GfnSignalingClient {
     }
 
     if (!allowQueue) {
+      return;
+    }
+
+    if (!this.shouldQueueWhenOffline()) {
+      this.log(`Dropping outbound ${envelope.label} ackid=${envelope.ackId} because signaling is closed post-establishment ${this.describeState()}`);
       return;
     }
 
@@ -432,6 +443,10 @@ export class GfnSignalingClient {
 
       if (detail.willRetry) {
         this.scheduleReconnect();
+      } else if (this.hasEverOpened) {
+        this.log(`Post-open signaling close will not reconnect; clearing queued signaling state ${this.describeState()}`);
+        this.queuedOutbound = [];
+        this.unackedOutbound.clear();
       }
     });
   }
@@ -450,8 +465,7 @@ export class GfnSignalingClient {
     const error = socketErrored || (normalizedCode >= 1002 && normalizedCode <= 1015);
     const willRetry =
       !this.isDisconnecting
-      && this.sessionPhase === "established"
-      && this.hasEverOpened
+      && this.sessionPhase === "sign-in"
       && this.reconnectAttempt < MAX_RECONNECT_ATTEMPTS
       && (error || normalizedCode === 1006 || normalizedCode === 1001);
 
@@ -492,6 +506,21 @@ export class GfnSignalingClient {
     }, RECONNECT_DELAY_MS);
   }
 
+  markEstablished(reason: SignalingEstablishedRequest["reason"]): void {
+    if (this.sessionPhase === "established") {
+      if (this.establishmentReason === null) {
+        this.establishmentReason = reason;
+      }
+      this.log(`Signaling establishment reaffirmed by ${reason} ${this.describeState()}`);
+      return;
+    }
+
+    this.sessionPhase = "established";
+    this.establishmentReason = reason;
+    this.clearReconnectTimer();
+    this.log(`Signaling session marked established by ${reason} ${this.describeState()}`);
+  }
+
   private handleMessage(text: string): void {
     let parsed: SignalingMessage;
     try {
@@ -526,9 +555,6 @@ export class GfnSignalingClient {
       this.log("Received non-JSON peer payload");
       return;
     }
-
-    this.sessionPhase = "established";
-    this.reconnectAttempt = 0;
 
     if (peerPayload.type === "offer" && typeof peerPayload.sdp === "string") {
       this.log(`Received offer sdpLen=${peerPayload.sdp.length} ${this.describeState()}`);
@@ -579,7 +605,6 @@ export class GfnSignalingClient {
       "answer",
       true,
     );
-    this.sessionPhase = "established";
   }
 
   async sendIceCandidate(candidate: IceCandidatePayload): Promise<void> {
@@ -639,5 +664,6 @@ export class GfnSignalingClient {
     this.unackedOutbound.clear();
     this.lastInboundAckId = 0;
     this.nextOutboundAckId = 0;
+    this.establishmentReason = null;
   }
 }

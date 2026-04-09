@@ -546,6 +546,10 @@ export interface KeyframeRequest {
   attempt: number;
 }
 
+export interface SignalingEstablishedRequest {
+  reason: "answer-sent" | "remote-ice" | "peer-connected" | "control-channel-open" | "media-live";
+}
+
 export type SignalingSessionPhase = "sign-in" | "established";
 
 export interface SignalingDisconnectInfo {
@@ -609,6 +613,7 @@ export interface OpenNowApi {
   showSessionConflictDialog(): Promise<SessionConflictChoice>;
   connectSignaling(input: SignalingConnectRequest): Promise<void>;
   disconnectSignaling(): Promise<void>;
+  markSignalingEstablished(input: SignalingEstablishedRequest): Promise<void>;
   sendAnswer(input: SendAnswerRequest): Promise<void>;
   sendIceCandidate(input: IceCandidatePayload): Promise<void>;
   requestKeyframe(input: KeyframeRequest): Promise<void>;

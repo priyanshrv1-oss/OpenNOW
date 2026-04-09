@@ -902,9 +902,20 @@ export function App(): JSX.Element {
     (adId: string, action: SessionAdAction, options?: QueueAdReportOptions) => void
   >(() => {});
   const signalingStateRef = useRef<SignalingConnectionState>("disconnected");
+  const signalingEstablishedRef = useRef(false);
 
   const getWebRtcSnapshot = useCallback((): WebRtcSessionSnapshot | null => {
     return clientRef.current?.getSessionSnapshot() ?? null;
+  }, []);
+
+  const markSignalingEstablished = useCallback((reason: "answer-sent" | "remote-ice" | "peer-connected" | "control-channel-open" | "media-live"): void => {
+    if (signalingEstablishedRef.current) {
+      return;
+    }
+    signalingEstablishedRef.current = true;
+    void window.openNow.markSignalingEstablished({ reason }).catch((error) => {
+      console.warn("[App] Failed to mark signaling established:", reason, error);
+    });
   }, []);
 
   const shouldKeepStreamingSessionAlive = useCallback((): boolean => {
@@ -1120,6 +1131,7 @@ export function App(): JSX.Element {
     setEscHoldReleaseIndicator({ visible: false, progress: 0 });
     resetStatsOverlayToPreference();
     diagnosticsStore.set(defaultDiagnostics());
+    signalingEstablishedRef.current = false;
 
     if (!options?.keepStreamingContext) {
       setStreamingGame(null);
@@ -1811,18 +1823,25 @@ export function App(): JSX.Element {
     }
 
     const evaluate = () => {
-      const snapshot = diagnosticsStore.getSnapshot();
+      const diagnosticsSnapshot = diagnosticsStore.getSnapshot();
+      const sessionSnapshot = getWebRtcSnapshot();
+      if (sessionSnapshot?.controlChannelOpen) {
+        markSignalingEstablished("control-channel-open");
+      } else if (sessionSnapshot?.peerConnected) {
+        markSignalingEstablished("peer-connected");
+      }
       const hasLiveFrames =
-        snapshot.framesDecoded > 0 || snapshot.framesReceived > 0 || snapshot.renderFps > 0;
+        diagnosticsSnapshot.framesDecoded > 0 || diagnosticsSnapshot.framesReceived > 0 || diagnosticsSnapshot.renderFps > 0;
       if (hasLiveFrames) {
         setSessionStartedAtMs(Date.now());
+        markSignalingEstablished("media-live");
       }
     };
 
     evaluate();
     const unsubscribe = diagnosticsStore.subscribe(evaluate);
     return unsubscribe;
-  }, [sessionStartedAtMs, streamStatus]);
+  }, [diagnosticsStore, getWebRtcSnapshot, markSignalingEstablished, sessionStartedAtMs, streamStatus]);
 
   useEffect(() => {
     if (!streamWarning) return;
@@ -1890,6 +1909,7 @@ export function App(): JSX.Element {
               fps: settings.fps,
               maxBitrateKbps: settings.maxBitrateMbps * 1000,
             });
+            markSignalingEstablished("answer-sent");
             setLaunchError(null);
             setStreamStatus("streaming");
             // Auto-enter fullscreen on stream start if user enabled it
@@ -1902,6 +1922,7 @@ export function App(): JSX.Element {
             }
           }
         } else if (event.type === "remote-ice") {
+          markSignalingEstablished("remote-ice");
           await clientRef.current?.addRemoteCandidate(event.candidate);
         } else if (event.type === "connected") {
           signalingStateRef.current = "connected";
@@ -1930,7 +1951,8 @@ export function App(): JSX.Element {
         } else if (event.type === "disconnected") {
           signalingStateRef.current = event.detail.willRetry ? "reconnecting" : "disconnected";
           const snapshot = getWebRtcSnapshot();
-          const keepAlive = event.detail.willRetry && shouldKeepStreamingSessionAlive();
+          const keepAlive = shouldKeepStreamingSessionAlive()
+            && (event.detail.willRetry || event.detail.sessionPhase === "established");
           console.warn("[App] Signaling disconnected", {
             ...event.detail,
             streamStatus: streamStatusRef.current,
@@ -1955,7 +1977,7 @@ export function App(): JSX.Element {
     });
 
     return () => unsubscribe();
-  }, [getWebRtcSnapshot, settings, shouldKeepStreamingSessionAlive, teardownStreamFromTerminalSignaling]);
+  }, [getWebRtcSnapshot, markSignalingEstablished, settings, shouldKeepStreamingSessionAlive, teardownStreamFromTerminalSignaling]);
 
   // Save settings when changed
   const updateSetting = useCallback(async <K extends keyof Settings>(key: K, value: Settings[K]) => {
