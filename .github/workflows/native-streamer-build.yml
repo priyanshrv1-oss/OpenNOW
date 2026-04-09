@@ -42,6 +42,7 @@ jobs:
     env:
       VCPKG_DEFAULT_TRIPLET: ${{ matrix.triplet }}
       VCPKG_FEATURE_FLAGS: manifests
+      NATIVE_VCPKG_CACHE_VERSION: v2
 
     steps:
       - name: Checkout
@@ -94,9 +95,9 @@ jobs:
           path: |
             ~/vcpkg
             ${{ github.workspace }}/opennow-native-streamer/vcpkg_installed
-          key: native-vcpkg-${{ runner.os }}-${{ matrix.triplet }}-${{ hashFiles('opennow-native-streamer/vcpkg.json', 'opennow-native-streamer/CMakeLists.txt') }}
+          key: native-vcpkg-${{ env.NATIVE_VCPKG_CACHE_VERSION }}-${{ runner.os }}-${{ matrix.triplet }}-${{ hashFiles('opennow-native-streamer/vcpkg.json', 'opennow-native-streamer/CMakeLists.txt', '.github/workflows/native-streamer-build.yml') }}
           restore-keys: |
-            native-vcpkg-${{ runner.os }}-${{ matrix.triplet }}-
+            native-vcpkg-${{ env.NATIVE_VCPKG_CACHE_VERSION }}-${{ runner.os }}-${{ matrix.triplet }}-
 
       - name: Bootstrap vcpkg
         shell: bash
@@ -126,6 +127,16 @@ jobs:
 
       - name: Build native streamer
         run: cmake --build opennow-native-streamer/build --config Release
+
+      - name: Verify Linux ARM SDL backends
+        if: matrix.label == 'linux-arm64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          DIAG_LOG="$RUNNER_TEMP/opennow-native-streamer-linux-arm64-diagnostics.log"
+          /bin/bash -lc './opennow-native-streamer/build/opennow-native-streamer --ipc-host=127.0.0.1 --ipc-port=9 --session-id=ci-linux-arm64-probe 2>&1 || true' | tee "$DIAG_LOG"
+          grep -E 'SDL video drivers available: .*x11' "$DIAG_LOG"
+          grep -E 'SDL audio drivers available: .*(alsa|pulseaudio|pipewire)' "$DIAG_LOG"
 
       - name: Upload native build artifact
         uses: actions/upload-artifact@v4

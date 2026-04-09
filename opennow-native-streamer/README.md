@@ -258,6 +258,8 @@ The native streamer CI workflow now builds a Linux ARM64 artifact on a GitHub-ho
 - workflow artifact name: `opennow-native-streamer-linux-arm64`
 - contained binary: `opennow-native-streamer`
 
+The workflow now also invalidates the native `vcpkg` cache when the Linux SDL dependency set changes and probes the built binary’s startup diagnostics to confirm the artifact actually contains desktop-capable SDL backends. Older cached artifacts produced before the dependency fix may still lack `wayland`/`x11`/real Linux audio backends; use a fresh artifact from a workflow run that includes the cache refresh.
+
 Practical usage on a Pi 4:
 
 1. Download the `linux-arm64` artifact from the PR or workflow run.
