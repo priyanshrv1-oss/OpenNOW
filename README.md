@@ -142,100 +142,11 @@ npm run dev
 
 Useful root scripts:
 
-<<<<<<< HEAD
 ```bash
 npm run dev
 npm run build
 npm run typecheck
 npm run dist
-=======
-## Download
-
-Grab the latest release for your platform:
-
-👉 **[Download from GitHub Releases](https://github.com/OpenCloudGaming/OpenNOW/releases)**
-
-| Platform | File |
-|----------|------|
-| Windows (installer) | `OpenNOW-v0.2.4-setup-x64.exe` |
-| Windows (portable) | `OpenNOW-v0.2.4-portable-x64.exe` |
-| macOS (x64) | `OpenNOW-v0.2.4-mac-x64.dmg` |
-| macOS (ARM) | `OpenNOW-v0.2.4-mac-arm64.dmg` |
-| Linux (x64) | `OpenNOW-v0.2.4-linux-x86_64.AppImage` |
-| Linux (ARM64) | `OpenNOW-v0.2.4-linux-arm64.AppImage` |
-
-## Nix
-
-You'll need to add this repo into your flake.nix:
-```nix
-{
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    
-    opennow.url = "github:OpenCloudGaming/OpenNOW"; 
-  };
-
-  outputs = {
-    self,
-    nixpkgs,
-    opennow,
-    ... }@inputs: {
-  };
-}
-```
-Then add the package to your configuration:
-```nix
-# Home-manager
-{
-  pkgs,
-  inputs,
-  ...
-}: {
-  home.packages = with pkgs; [
-    inputs.opennow.packages.${pkgs.system}.default
-  ];
-}
-```
-
-```nix
-# Nixos configuraion
-{
-  pkgs,
-  inputs,
-  ...
-}: {
-  environment.systemPackages = with pkgs; [
-    inputs.opennow.packages.${pkgs.system}.default
-  ];
-}
-```
-
-
-## Architecture
-
-OpenNOW is an Electron app with three processes:
-
-| Layer | Technology | Role |
-|-------|-----------|------|
-| **Main** | Node.js + Electron | OAuth, CloudMatch API, WebSocket signaling, settings |
-| **Renderer** | React 19 + TypeScript | UI, WebRTC streaming, input encoding, stats |
-| **Preload** | Electron contextBridge | Secure IPC between main and renderer |
-
-```
-opennow-stable/src/
-├── main/           # Electron main process
-│   ├── gfn/        # Auth, CloudMatch, signaling, games, subscription
-│   ├── index.ts    # Entry point, IPC handlers, window management
-│   └── settings.ts # Persistent user settings
-├── renderer/src/   # React UI
-│   ├── components/ # Login, Home, Library, Settings, StreamView
-│   ├── gfn/        # WebRTC client, SDP, input protocol
-│   └── App.tsx     # Root component with routing and state
-├── shared/         # Shared types and IPC channel definitions
-│   ├── gfn.ts      # All TypeScript interfaces
-│   └── ipc.ts      # IPC channel constants
-└── preload/        # Context bridge (safe API exposure)
->>>>>>> bf6734b (Add Nix installation instructions in README and fix app links in flake)
 ```
 
 For a fuller setup guide, see [docs/development.md](docs/development.md).
