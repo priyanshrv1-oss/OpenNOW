@@ -18,6 +18,7 @@ opennow-native-streamer/vcpkg_installed/
 .vscode/
 *.swp
 *.swo
+.serena/
 
 # OS
 .DS_Store
