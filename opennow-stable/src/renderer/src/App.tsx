@@ -643,6 +643,7 @@ export function App(): JSX.Element {
     microphoneMode: "disabled",
     microphoneDeviceId: "",
     hideStreamButtons: false,
+    showStatsOnLaunch: false,
     controllerMode: false,
     controllerUiSounds: false,
     controllerBackgroundAnimations: false,
@@ -669,7 +670,7 @@ export function App(): JSX.Element {
   // Stream State
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("idle");
-  const [showStatsOverlay, setShowStatsOverlay] = useState(true);
+  const [showStatsOverlay, setShowStatsOverlay] = useState(false);
   const [antiAfkEnabled, setAntiAfkEnabled] = useState(false);
   const [escHoldReleaseIndicator, setEscHoldReleaseIndicator] = useState<{ visible: boolean; progress: number }>({
     visible: false,
@@ -693,6 +694,10 @@ export function App(): JSX.Element {
   const isStreaming = streamStatus === "streaming";
 
   const controllerOverlayOpenRef = useRef(false);
+
+  const resetStatsOverlayToPreference = useCallback((): void => {
+    setShowStatsOverlay(settings.showStatsOnLaunch);
+  }, [settings.showStatsOnLaunch]);
 
   const handleControllerPageNavigate = useCallback((direction: "prev" | "next"): void => {
     if (controllerOverlayOpenRef.current) {
@@ -1117,6 +1122,7 @@ export function App(): JSX.Element {
     setStreamBackend(null);
     setNativeStreamerState(null);
     nativeStopExpectedRef.current = false;
+    resetStatsOverlayToPreference();
     diagnosticsStore.set(defaultDiagnostics());
 
     if (!options?.keepStreamingContext) {
@@ -1127,7 +1133,7 @@ export function App(): JSX.Element {
     if (!options?.keepLaunchError) {
       setLaunchError(null);
     }
-  }, [diagnosticsStore]);
+  }, [diagnosticsStore, resetStatsOverlayToPreference]);
 
   // Session ref sync
   useEffect(() => {
@@ -1509,6 +1515,7 @@ export function App(): JSX.Element {
         // Load settings first
         const loadedSettings = await window.openNow.getSettings();
         setSettings(loadedSettings);
+        setShowStatsOverlay(loadedSettings.showStatsOnLaunch);
         setSettingsLoaded(true);
 
         // Load providers and session (refresh only if token is near expiry)
@@ -2200,7 +2207,7 @@ export function App(): JSX.Element {
       signalingUrl: claimed.signalingUrl,
       target: useNativeStreamer ? "native-streamer" : "renderer-webrtc",
     });
-  }, [authSession, effectiveStreamingBaseUrl, findGameContextForSession, settings]);
+  }, [authSession, effectiveStreamingBaseUrl, findGameContextForSession, resetStatsOverlayToPreference, settings]);
 
   // Play game handler
   const handlePlayGame = useCallback(async (game: GameInfo, options?: { bypassGuards?: boolean }) => {
@@ -2232,6 +2239,7 @@ export function App(): JSX.Element {
     setSessionStartedAtMs(null);
     setStreamWarning(null);
     setLaunchError(null);
+    resetStatsOverlayToPreference();
     const selectedVariantId = variantByGameId[game.id] ?? defaultVariantId(game);
     const selectedVariant = getSelectedVariant(game, selectedVariantId);
     startPlaytimeSession(game.id);
@@ -2504,6 +2512,7 @@ export function App(): JSX.Element {
     effectiveStreamingBaseUrl,
     refreshNavbarActiveSession,
     resetLaunchRuntime,
+    resetStatsOverlayToPreference,
     selectedProvider,
     settings,
     streamStatus,
@@ -2530,6 +2539,7 @@ export function App(): JSX.Element {
     setQueuePosition(undefined);
     setSessionStartedAtMs(null);
     setStreamWarning(null);
+    resetStatsOverlayToPreference();
     const matchedContext = findGameContextForSession(navbarActiveSession);
     if (matchedContext) {
       setStreamingGame(matchedContext.game);
@@ -2562,6 +2572,7 @@ export function App(): JSX.Element {
     findGameContextForSession,
     refreshNavbarActiveSession,
     resetLaunchRuntime,
+    resetStatsOverlayToPreference,
     selectedProvider,
     streamStatus,
   ]);
