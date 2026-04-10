@@ -70,22 +70,8 @@ export function colorQualityRequiresHevc(cq: ColorQuality): boolean {
 export const USER_FACING_VIDEO_CODEC_OPTIONS: readonly VideoCodec[] = ["H264", "H265", "AV1"];
 export const USER_FACING_COLOR_QUALITY_OPTIONS: readonly ColorQuality[] = ["8bit_420", "8bit_444", "10bit_420", "10bit_444"];
 
-const ALLOWED_COLOR_QUALITIES_BY_CODEC: Record<VideoCodec, readonly ColorQuality[]> = {
-  H264: USER_FACING_COLOR_QUALITY_OPTIONS,
-  H265: USER_FACING_COLOR_QUALITY_OPTIONS,
-  AV1: USER_FACING_COLOR_QUALITY_OPTIONS,
-};
-
 export function isSupportedUserFacingCodec(codec: VideoCodec): boolean {
   return USER_FACING_VIDEO_CODEC_OPTIONS.includes(codec);
-}
-
-export function getAllowedColorQualitiesForCodec(codec: VideoCodec): readonly ColorQuality[] {
-  return ALLOWED_COLOR_QUALITIES_BY_CODEC[codec] ?? USER_FACING_COLOR_QUALITY_OPTIONS;
-}
-
-export function isAllowedColorQualityForCodec(codec: VideoCodec, colorQuality: ColorQuality): boolean {
-  return getAllowedColorQualitiesForCodec(codec).includes(colorQuality);
 }
 
 export function normalizeStreamPreferences(codec: VideoCodec, colorQuality: ColorQuality): {
@@ -96,10 +82,9 @@ export function normalizeStreamPreferences(codec: VideoCodec, colorQuality: Colo
   const normalizedCodec = isSupportedUserFacingCodec(codec)
     ? codec
     : USER_FACING_VIDEO_CODEC_OPTIONS[0];
-  const allowedColorQualities = getAllowedColorQualitiesForCodec(normalizedCodec);
-  const normalizedColorQuality = isAllowedColorQualityForCodec(normalizedCodec, colorQuality)
+  const normalizedColorQuality = USER_FACING_COLOR_QUALITY_OPTIONS.includes(colorQuality)
     ? colorQuality
-    : allowedColorQualities[0];
+    : USER_FACING_COLOR_QUALITY_OPTIONS[0];
 
   return {
     codec: normalizedCodec,

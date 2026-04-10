@@ -48,8 +48,7 @@ const allColorQualityOptions: { value: ColorQuality; label: string; description:
   { value: "10bit_444", label: "10-bit 4:4:4", description: "Highest chroma and bit depth" },
 ];
 
-const colorQualityOptions: { value: ColorQuality; label: string; description: string }[] = allColorQualityOptions
-  .filter((option) => USER_FACING_COLOR_QUALITY_OPTIONS.includes(option.value));
+const colorQualityOptions: { value: ColorQuality; label: string; description: string }[] = [...allColorQualityOptions];
 
 /* ── Static fallbacks (used when MES API is unavailable) ─────────── */
 
