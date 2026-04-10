@@ -144,7 +144,7 @@ export class NativeStreamerManager {
     const socket = this.socket;
     if (socket && !socket.destroyed) {
       try {
-        await this.send("stop", {});
+        await this.writeEnvelope(socket, "stop", {});
       } catch {
       }
       this.socket = null;
@@ -203,6 +203,10 @@ export class NativeStreamerManager {
     if (!socket || socket.destroyed) {
       throw new Error("Native streamer IPC socket is not available");
     }
+    await this.writeEnvelope(socket, type, payload);
+  }
+
+  private async writeEnvelope(socket: Socket, type: string, payload: unknown): Promise<void> {
     const envelope = JSON.stringify({ type, version: IPC_VERSION, payload });
     await new Promise<void>((resolve, reject) => {
       socket.write(`${envelope}\n`, (error) => {
