@@ -5,7 +5,6 @@ package media
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
 	"sync"
@@ -63,18 +62,15 @@ func init() {
 }
 
 func (p *gstreamerPlayer) Start(ctx context.Context, cfg Config) error {
-	if err := gst.Init(nil); err != nil {
-		return err
-	}
+	gst.Init(nil)
 	if err := sdl.Init(sdl.INIT_VIDEO | sdl.INIT_GAMECONTROLLER | sdl.INIT_AUDIO); err != nil {
 		return err
 	}
 	p.inputSink = cfg.InputSink
 	p.controllers = map[uint32]*controllerState{}
 	p.controllerHandles = map[uint32]*sdl.GameController{}
-	if _, err := sdl.GameControllerEventState(sdl.ENABLE); err != nil {
-		return err
-	}
+	sdl.GameControllerEventState(sdl.ENABLE)
+
 	window, err := sdl.CreateWindow(cfg.WindowTitle, sdl.WINDOWPOS_CENTERED, sdl.WINDOWPOS_CENTERED, int32(cfg.Width), int32(cfg.Height), sdl.WINDOW_RESIZABLE|sdl.WINDOW_ALLOW_HIGHDPI)
 	if err != nil {
 		return err
@@ -88,7 +84,7 @@ func (p *gstreamerPlayer) Start(ctx context.Context, cfg Config) error {
 	p.pipe = pipe
 	p.videoIn = videoIn
 	p.audioIn = audioIn
-	if _, err = pipe.SetState(gst.StatePlaying); err != nil {
+	if err := pipe.SetState(gst.StatePlaying); err != nil {
 		return err
 	}
 
@@ -104,14 +100,9 @@ func buildPipeline(codec string) (*gst.Pipeline, *app.Source, *app.Source, error
 	var lastErr error
 	for _, videoPart := range videoCandidates {
 		launch := fmt.Sprintf("%s %s", videoPart, audioPart)
-		obj, err := gst.NewPipelineFromString(launch)
+		pipe, err := gst.NewPipelineFromString(launch)
 		if err != nil {
 			lastErr = err
-			continue
-		}
-		pipe, ok := obj.(*gst.Pipeline)
-		if !ok {
-			lastErr = errors.New("unexpected pipeline type")
 			continue
 		}
 		videoElem, err := pipe.GetElementByName("videoIn")
@@ -159,7 +150,10 @@ func (p *gstreamerPlayer) PushVideoRTP(packet []byte) error {
 		return nil
 	}
 	buf := gst.NewBufferFromBytes(packet)
-	return p.videoIn.PushBuffer(buf)
+	if flow := p.videoIn.PushBuffer(buf); flow != gst.FlowOK {
+		return fmt.Errorf("video appsrc push failed: %s", flow.String())
+	}
+	return nil
 }
 
 func (p *gstreamerPlayer) PushAudioRTP(packet []byte) error {
@@ -169,7 +163,10 @@ func (p *gstreamerPlayer) PushAudioRTP(packet []byte) error {
 		return nil
 	}
 	buf := gst.NewBufferFromBytes(packet)
-	return p.audioIn.PushBuffer(buf)
+	if flow := p.audioIn.PushBuffer(buf); flow != gst.FlowOK {
+		return fmt.Errorf("audio appsrc push failed: %s", flow.String())
+	}
+	return nil
 }
 
 func (p *gstreamerPlayer) SetStatus(status string) {
@@ -186,7 +183,7 @@ func (p *gstreamerPlayer) Close() error {
 		p.cancel = nil
 	}
 	if p.pipe != nil {
-		p.pipe.SetState(gst.StateNull)
+		_ = p.pipe.SetState(gst.StateNull)
 		p.pipe = nil
 	}
 	for instanceID, controller := range p.controllerHandles {
@@ -221,10 +218,12 @@ func (p *gstreamerPlayer) eventLoop(ctx context.Context) {
 					p.handleMouseButtonEvent(typed)
 				case *sdl.MouseWheelEvent:
 					p.handleMouseWheelEvent(typed)
-				case *sdl.ControllerDeviceAddedEvent:
-					p.handleControllerAdded(typed)
-				case *sdl.ControllerDeviceRemovedEvent:
-					p.handleControllerRemoved(typed)
+				case *sdl.ControllerDeviceEvent:
+					if typed.Type == sdl.CONTROLLERDEVICEADDED {
+						p.handleControllerAdded(typed)
+					} else if typed.Type == sdl.CONTROLLERDEVICEREMOVED {
+						p.handleControllerRemoved(typed)
+					}
 				case *sdl.ControllerButtonEvent:
 					p.handleControllerButtonEvent(typed)
 				case *sdl.ControllerAxisEvent:
@@ -240,12 +239,11 @@ func (p *gstreamerPlayer) handleKeyboardEvent(event *sdl.KeyboardEvent) {
 	if mapped == nil {
 		return
 	}
-	down := event.Type == sdl.KEYDOWN
 	_ = p.emitInput("keyboard", protocol.KeyboardInput{
 		Keycode:   mapped.keycode,
 		Scancode:  mapped.scancode,
 		Modifiers: mapped.modifiers,
-		Down:      down,
+		Down:      event.Type == sdl.KEYDOWN,
 	})
 }
 
@@ -265,9 +263,9 @@ func (p *gstreamerPlayer) handleMouseWheelEvent(event *sdl.MouseWheelEvent) {
 	_ = p.emitInput("mouse-wheel", protocol.MouseWheelInput{Delta: clampInt16(int(event.Y * 120))})
 }
 
-func (p *gstreamerPlayer) handleControllerAdded(event *sdl.ControllerDeviceAddedEvent) {
-	controller, err := sdl.GameControllerOpen(int(event.Which))
-	if err != nil {
+func (p *gstreamerPlayer) handleControllerAdded(event *sdl.ControllerDeviceEvent) {
+	controller := sdl.GameControllerOpen(int(event.Which))
+	if controller == nil {
 		return
 	}
 	instanceID := uint32(controller.Joystick().InstanceID())
@@ -282,7 +280,7 @@ func (p *gstreamerPlayer) handleControllerAdded(event *sdl.ControllerDeviceAdded
 	p.emitControllerState(instanceID, state)
 }
 
-func (p *gstreamerPlayer) handleControllerRemoved(event *sdl.ControllerDeviceRemovedEvent) {
+func (p *gstreamerPlayer) handleControllerRemoved(event *sdl.ControllerDeviceEvent) {
 	instanceID := uint32(event.Which)
 	p.mu.Lock()
 	if controller := p.controllerHandles[instanceID]; controller != nil {
@@ -385,7 +383,7 @@ type keyboardMapping struct {
 }
 
 func mapSDLKeyboardEvent(event *sdl.KeyboardEvent) *keyboardMapping {
-	vk, sc, ok := sdlScancodeMap[event.Keysym.Scancode]
+	pair, ok := sdlScancodeMap[event.Keysym.Scancode]
 	if !ok {
 		return nil
 	}
@@ -408,7 +406,7 @@ func mapSDLKeyboardEvent(event *sdl.KeyboardEvent) *keyboardMapping {
 	if event.Keysym.Mod&sdl.KMOD_NUM != 0 {
 		mods |= 0x20
 	}
-	return &keyboardMapping{keycode: vk, scancode: sc, modifiers: mods}
+	return &keyboardMapping{keycode: pair[0], scancode: pair[1], modifiers: mods}
 }
 
 var sdlScancodeMap = map[sdl.Scancode][2]uint16{
