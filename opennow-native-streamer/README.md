@@ -71,17 +71,28 @@ A dedicated GitHub Actions workflow builds downloadable native-streamer binaries
 - triggers: `workflow_dispatch`, matching `pull_request`, and matching pushes to `dev` / `main`
 - artifacts: Windows x64, macOS x64, macOS arm64, Linux x64
 
-From the Actions tab, open the `native-streamer-build` workflow run and download the artifact for your target platform. Each artifact contains the built `opennow-native-streamer` binary for that runner/architecture.
+From the Actions tab, open the `native-streamer-build` workflow run and download the artifact for your target platform.
+
+- macOS/Linux artifacts contain the built `opennow-native-streamer` binary for that runner/architecture.
+- Windows artifacts contain a runnable folder layout, not just the EXE:
+  - `opennow-native-streamer.exe`
+  - bundled MinGW/UCRT runtime DLLs
+  - bundled SDL2 and GStreamer runtime DLLs
+  - `gstreamer-plugins/` with the matching plugin set from CI
+  - `libexec/gstreamer-1.0/gst-plugin-scanner.exe`
+
+For Windows, keep the extracted folder contents together. OpenNOW should launch the EXE from inside that folder so the bundled DLLs and GStreamer plugins remain discoverable.
 
 Current CI caveats:
 
 - Linux arm64 / Raspberry Pi is intentionally not greenwashed in CI yet. The codebase treats it as a real target, but the workflow leaves it disabled until runner and dependency provisioning are reproducible.
-- The workflow installs native GStreamer / SDL2 development dependencies per platform before building. These artifacts are build outputs only; they do not bundle full platform runtime installers for GStreamer.
-- Windows builds use MSYS2 UCRT64 packages for the CGO compiler, `pkg-config`, GStreamer, and SDL2.
+- The workflow installs native GStreamer / SDL2 development dependencies per platform before building.
+- Windows builds use MSYS2 UCRT64 packages for the CGO compiler, `pkg-config`, GStreamer, and SDL2, and the workflow now bundles the matching runtime DLLs and GStreamer plugin tree into the artifact so end users do not need a separate MSYS2 installation.
+- A separately installed official GStreamer MSVC runtime does not satisfy the MSYS2/UCRT build produced by CI. Use the bundled Windows artifact contents as-is.
 
 ## Platform notes
 
-- Windows: intended decoder path is Media Foundation / D3D11-backed GStreamer plugins when available.
+- Windows: intended decoder path is Media Foundation / D3D11-backed GStreamer plugins when available. The CI artifact is packaged as a self-contained folder with the matching MSYS2/UCRT runtime and GStreamer plugin set.
 - macOS: intended decoder path is VideoToolbox-backed GStreamer plugins.
 - Linux x64: intended decoder path is VA-API/NVDEC depending on host.
 - Linux ARM / Raspberry Pi: keep decoder selection capability-based. V4L2, VA-API, and software fallback must remain valid options.

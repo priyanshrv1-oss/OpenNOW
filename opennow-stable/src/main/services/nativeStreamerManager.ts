@@ -3,7 +3,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import { createInterface } from "node:readline";
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import type { Readable } from "node:stream";
-import { access, chmod, rm } from "node:fs/promises";
+import { access, chmod, mkdir, rm } from "node:fs/promises";
 import { constants } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -84,10 +84,7 @@ export class NativeStreamerManager {
     const endpoint = await this.prepareServer();
     const descriptor = await this.resolveProcessDescriptor();
     try {
-      const env = {
-        ...process.env,
-        OPENNOW_NATIVE_STREAMER_ENDPOINT: endpoint,
-      };
+      const env = await this.buildProcessEnv(descriptor, endpoint);
       this.child = spawn(descriptor.command, descriptor.args, {
         cwd: descriptor.cwd ?? REPO_ROOT,
         env,
@@ -400,6 +397,56 @@ export class NativeStreamerManager {
     } catch {
       return false;
     }
+  }
+
+  private async buildProcessEnv(descriptor: NativeProcessDescriptor, endpoint: string): Promise<NodeJS.ProcessEnv> {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      OPENNOW_NATIVE_STREAMER_ENDPOINT: endpoint,
+    };
+
+    if (descriptor.args.length > 0) {
+      return env;
+    }
+
+    const runtimeDir = dirname(descriptor.command);
+    if (process.platform === "win32") {
+      const pluginDir = await this.firstExistingPath([
+        join(runtimeDir, "gstreamer-plugins"),
+        join(runtimeDir, "lib", "gstreamer-1.0"),
+      ]);
+      const pluginScanner = await this.firstExistingPath([
+        join(runtimeDir, "libexec", "gstreamer-1.0", "gst-plugin-scanner.exe"),
+        join(runtimeDir, "gst-plugin-scanner.exe"),
+      ]);
+
+      env.PATH = [runtimeDir, env.PATH].filter(Boolean).join(";");
+      if (pluginDir) {
+        env.GST_PLUGIN_PATH_1_0 = pluginDir;
+        env.GST_PLUGIN_SYSTEM_PATH_1_0 = pluginDir;
+        env.GST_PLUGIN_PATH = pluginDir;
+      }
+      if (pluginScanner) {
+        env.GST_PLUGIN_SCANNER_1_0 = pluginScanner;
+      }
+
+      const registryDir = join(app.getPath("userData"), "native-streamer");
+      await mkdir(registryDir, { recursive: true });
+      env.GST_REGISTRY_1_0 = join(registryDir, "registry.bin");
+    }
+
+    return env;
+  }
+
+  private async firstExistingPath(candidates: string[]): Promise<string | null> {
+    for (const candidate of candidates) {
+      try {
+        await access(candidate, constants.F_OK);
+        return candidate;
+      } catch {
+      }
+    }
+    return null;
   }
 }
 
