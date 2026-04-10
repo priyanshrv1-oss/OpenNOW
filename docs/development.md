@@ -204,6 +204,6 @@ cd opennow-stable
 npm run cap:open:android
 ```
 
-Current Android support is limited to the core cloud-gaming path. Android login now follows the same localhost callback pattern as desktop by opening the OAuth flow in the browser and receiving the code through a temporary localhost listener hosted by the Android shell. Desktop-specific features such as quit app, pointer-lock toggles, log export, cache deletion, show-in-folder actions, and screenshot save-as are intentionally gated or unavailable on Android in this pass.
+Current Android support is limited to the core cloud-gaming path. Android login now follows the same localhost redirect contract as desktop (`http://localhost:<port>` for both authorize and token exchange), but the Android shell intercepts that navigation inside a native WebView instead of hosting a real localhost callback server. Desktop-specific features such as quit app, pointer-lock toggles, log export, cache deletion, show-in-folder actions, and screenshot save-as are intentionally gated or unavailable on Android in this pass.
 
 For CI-based testing, use the APK artifact uploaded by the `auto-build` workflow. It is a debug/testing package and is not release-signed.

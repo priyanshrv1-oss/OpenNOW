@@ -1,6 +1,5 @@
 import { App as CapacitorApp } from "@capacitor/app";
-import { Browser } from "@capacitor/browser";
-import { CapacitorHttp, registerPlugin, type PluginListenerHandle } from "@capacitor/core";
+import { CapacitorHttp, registerPlugin } from "@capacitor/core";
 import { Device } from "@capacitor/device";
 import { Directory, Filesystem } from "@capacitor/filesystem";
 import { Preferences } from "@capacitor/preferences";
@@ -92,9 +91,7 @@ const APP_METADATA_QUERY_HASH = "39187e85b6dcf60b7279a5f233288b0a8b69a8b1dbcfb5b
 const DEFAULT_LOCALE = "en_US";
 
 interface LocalhostAuthPlugin {
-  startServer(): Promise<{ port: number }>;
-  waitForCode(options: { timeoutMs?: number }): Promise<{ code: string }>;
-  stopServer(): Promise<void>;
+  startLogin(options: { authUrl: string; port: number; timeoutMs?: number }): Promise<{ code: string; redirectUri?: string }>;
 }
 
 const LocalhostAuth = registerPlugin<LocalhostAuthPlugin>("LocalhostAuth");
@@ -136,6 +133,8 @@ async function refreshWithClientToken(clientToken: string, userId: string): Prom
 function mergeTokenSnapshot(base: AuthTokens, refreshed: TokenResponse): AuthTokens { return { accessToken: refreshed.access_token, refreshToken: refreshed.refresh_token ?? base.refreshToken, idToken: refreshed.id_token, expiresAt: toExpiresAt(refreshed.expires_in), clientToken: refreshed.client_token ?? base.clientToken, clientTokenExpiresAt: base.clientTokenExpiresAt, clientTokenLifetimeMs: base.clientTokenLifetimeMs }; }
 async function fetchUserInfo(tokens: AuthTokens): Promise<AuthSession["user"]> { const jwtUser = userFromJwt(tokens); if (jwtUser?.email || jwtUser?.avatarUrl) return jwtUser; const payload = await httpRequest<{ sub: string; preferred_username?: string; email?: string; picture?: string }>(USERINFO_ENDPOINT, { headers: { Authorization: `Bearer ${tokens.accessToken}`, Origin: "https://nvfile", Accept: "application/json", "User-Agent": GFN_USER_AGENT } }); return { userId: payload.sub, displayName: payload.preferred_username ?? payload.email?.split("@")[0] ?? "User", email: payload.email, avatarUrl: payload.picture ?? (payload.email ? gravatarUrl(payload.email) : undefined), membershipTier: jwtUser?.membershipTier ?? "FREE" }; }
 
+const AUTH_REDIRECT_PORTS = [2259, 6460, 7119, 8870, 9096] as const;
+
 class AndroidAuthService {
   private providers: LoginProvider[] = [];
   private session: AuthSession | null = null;
@@ -151,61 +150,17 @@ class AndroidAuthService {
     await writePreferenceJson(AUTH_STATE_KEY, { session: this.session, selectedProvider: this.selectedProvider });
   }
 
+  private pickAuthRedirectPort(): number {
+    return AUTH_REDIRECT_PORTS[0];
+  }
+
   private async waitForAuthorizationCode(authUrl: string, port: number, timeoutMs = 180000): Promise<string> {
-    let browserFinishedListener: PluginListenerHandle | null = null;
-    let browserFinishedTimeout: ReturnType<typeof setTimeout> | null = null;
-    let settled = false;
-
-    const cleanup = async (): Promise<void> => {
-      if (browserFinishedTimeout) {
-        clearTimeout(browserFinishedTimeout);
-        browserFinishedTimeout = null;
-      }
-      await Promise.allSettled([
-        browserFinishedListener?.remove() ?? Promise.resolve(),
-        LocalhostAuth.stopServer().catch(() => undefined),
-        Browser.close().catch(() => undefined),
-      ]);
-      browserFinishedListener = null;
-    };
-
-    try {
-      return await new Promise<string>(async (resolve, reject) => {
-        const settle = (fn: () => void): void => {
-          if (settled) return;
-          settled = true;
-          if (browserFinishedTimeout) {
-            clearTimeout(browserFinishedTimeout);
-            browserFinishedTimeout = null;
-          }
-          fn();
-        };
-
-        browserFinishedListener = await Browser.addListener("browserFinished", () => {
-          if (browserFinishedTimeout) return;
-          browserFinishedTimeout = setTimeout(() => {
-            settle(() => reject(new Error("Login was cancelled before the OAuth callback completed")));
-          }, 750);
-        });
-
-        void LocalhostAuth.waitForCode({ timeoutMs })
-          .then(({ code }) => {
-            settle(() => resolve(code));
-          })
-          .catch((error) => {
-            const message = error instanceof Error ? error.message : String(error);
-            settle(() => reject(new Error(message)));
-          });
-
-        try {
-          await Browser.open({ url: authUrl, presentationStyle: "fullscreen" });
-        } catch (error) {
-          settle(() => reject(error instanceof Error ? error : new Error(String(error))));
-        }
-      });
-    } finally {
-      await cleanup();
+    const { code, redirectUri } = await LocalhostAuth.startLogin({ authUrl, port, timeoutMs });
+    const expectedRedirectUri = authRedirectUri(port);
+    if (redirectUri && redirectUri !== expectedRedirectUri) {
+      throw new Error(`Unexpected OAuth redirect URI: ${redirectUri}`);
     }
+    return code;
   }
 
   async getProviders(): Promise<LoginProvider[]> {
@@ -237,7 +192,7 @@ class AndroidAuthService {
     const { identifier } = await Device.getId();
     const deviceId = identifier || `android-${Math.random().toString(16).slice(2)}`;
     const { verifier, challenge } = await createPkce();
-    const { port } = await LocalhostAuth.startServer();
+    const port = this.pickAuthRedirectPort();
     const authUrl = buildAuthUrl(this.selectedProvider, challenge, deviceId, port);
     const code = await this.waitForAuthorizationCode(authUrl, port);
     const initialTokens = await exchangeAuthorizationCode(code, verifier, port);
