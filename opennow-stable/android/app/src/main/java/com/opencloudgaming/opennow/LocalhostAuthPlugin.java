@@ -80,7 +80,12 @@ public class LocalhostAuthPlugin extends Plugin {
             } catch (ExecutionException error) {
                 stopServerInternal();
                 Throwable cause = error.getCause() != null ? error.getCause() : error;
-                call.reject(cause.getMessage(), cause);
+                String message = cause.getMessage() != null ? cause.getMessage() : cause.toString();
+                if (cause instanceof Exception) {
+                    call.reject(message, (Exception) cause);
+                } else {
+                    call.reject(message);
+                }
             } catch (InterruptedException error) {
                 Thread.currentThread().interrupt();
                 stopServerInternal();
