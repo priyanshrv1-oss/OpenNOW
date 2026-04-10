@@ -1,4 +1,4 @@
-package com.opencouldgaming.opennow;
+package com.opencloudgaming.opennow;
 
 import static org.junit.Assert.*;
 
@@ -21,6 +21,6 @@ public class ExampleInstrumentedTest {
         // Context of the app under test.
         Context appContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
 
-        assertEquals("com.opencouldgaming.opennow", appContext.getPackageName());
+        assertEquals("com.opencloudgaming.opennow", appContext.getPackageName());
     }
 }

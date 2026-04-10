@@ -1,4 +1,4 @@
-package com.opencouldgaming.opennow;
+package com.opencloudgaming.opennow;
 
 import com.getcapacitor.BridgeActivity;
 
