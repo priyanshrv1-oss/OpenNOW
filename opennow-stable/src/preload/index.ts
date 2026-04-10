@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import electron from "electron";
 
 import { IPC_CHANNELS } from "@shared/ipc";
 import type {
@@ -35,6 +35,8 @@ import type {
   ThankYouDataResult,
 } from "@shared/gfn";
 import { parseSerializedSessionErrorTransport } from "@shared/sessionError";
+
+const { contextBridge, ipcRenderer } = electron;
 
 function unwrapSessionInvokeError(error: unknown): never {
   if (error instanceof Error) {
@@ -140,8 +142,7 @@ const api: OpenNowApi = {
     ipcRenderer.invoke(IPC_CHANNELS.MEDIA_SHOW_IN_FOLDER, input),
   deleteCache: (): Promise<void> =>
     ipcRenderer.invoke(IPC_CHANNELS.CACHE_DELETE_ALL),
-  getThanksData: (): Promise<ThankYouDataResult> =>
-    ipcRenderer.invoke(IPC_CHANNELS.COMMUNITY_GET_THANKS),
+  getThanksData: (): Promise<ThankYouDataResult> => ipcRenderer.invoke(IPC_CHANNELS.COMMUNITY_GET_THANKS),
 };
 
 contextBridge.exposeInMainWorld("openNow", api);
