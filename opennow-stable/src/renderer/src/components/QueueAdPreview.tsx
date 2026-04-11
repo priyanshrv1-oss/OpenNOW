@@ -88,7 +88,6 @@ export const QueueAdPreview = forwardRef<QueueAdPreviewHandle, QueueAdPreviewPro
   ref,
 ): JSX.Element {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const originalVolumeRef = useRef<number | null>(null);
   const playbackStateRef = useRef<QueueAdPlaybackState>("loading");
   // Guards against firing "ended" twice when the proactive timeupdate path
   // already fired it before the native ended event arrives.
@@ -173,11 +172,17 @@ export const QueueAdPreview = forwardRef<QueueAdPreviewHandle, QueueAdPreviewPro
       return;
     }
 
-    if (originalVolumeRef.current === null) {
-      originalVolumeRef.current = video.volume;
-    }
+    const originalVolume = video.volume;
+    const restoreOriginalVolume = (): void => {
+      try {
+        video.volume = originalVolume;
+      } catch {
+        // ignore
+      }
+    };
+
     try {
-      video.volume = Math.max(0, Math.min(1, (originalVolumeRef.current ?? 1) * 0.25));
+      video.volume = Math.max(0, Math.min(1, originalVolume * 0.3125));
     } catch {
       // Ignore if setting volume is not permitted
     }
@@ -210,6 +215,8 @@ export const QueueAdPreview = forwardRef<QueueAdPreviewHandle, QueueAdPreviewPro
         finishFiredRef.current = true;
         onPlaybackEventRef.current?.("ended");
       }
+
+      restoreOriginalVolume();
     };
 
     const handleWaiting = (): void => {
@@ -227,6 +234,7 @@ export const QueueAdPreview = forwardRef<QueueAdPreviewHandle, QueueAdPreviewPro
     const handleError = (): void => {
       setPlayback("error");
       onPlaybackEventRef.current?.("error");
+      restoreOriginalVolume();
     };
 
     video.addEventListener("loadstart", handleLoadStart);
@@ -249,13 +257,7 @@ export const QueueAdPreview = forwardRef<QueueAdPreviewHandle, QueueAdPreviewPro
       video.removeEventListener("waiting", handleWaiting);
       video.removeEventListener("stalled", handleStalled);
       video.removeEventListener("error", handleError);
-      if (originalVolumeRef.current !== null) {
-        try {
-          video.volume = originalVolumeRef.current;
-        } catch {
-          // ignore
-        }
-      }
+      restoreOriginalVolume();
     };
   }, [mediaUrl]); // intentionally excludes onPlaybackEvent — stored in ref above
 
