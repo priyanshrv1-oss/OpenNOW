@@ -47,6 +47,8 @@ type NativeEventMessage =
   | { type: "pong" };
 
 export class NativeStreamerManager {
+  private static readonly MAX_FRAME_LENGTH = 8 * 1024 * 1024;
+  private static readonly STOP_FLUSH_TIMEOUT_MS = 750;
   private server: net.Server | null = null;
   private socket: net.Socket | null = null;
   private process: ChildProcess | null = null;
@@ -114,11 +116,7 @@ export class NativeStreamerManager {
   }
 
   async stop(request: NativeStreamerStopRequest = {}): Promise<void> {
-    if (this.socket) {
-      this.send({ type: "stop_session", reason: request.reason ?? null });
-      this.socket.destroy();
-      this.socket = null;
-    }
+    await this.closeSocketGracefully(request.reason ?? null);
     if (this.process) {
       this.process.kill();
       this.process = null;
@@ -248,12 +246,22 @@ export class NativeStreamerManager {
     this.decodeBuffer = Buffer.concat([this.decodeBuffer, chunk]);
     while (this.decodeBuffer.length >= 4) {
       const len = this.decodeBuffer.readUInt32BE(0);
+      if (len === 0 || len > NativeStreamerManager.MAX_FRAME_LENGTH) {
+        void this.handleDecoderFailure(`invalid native frame length: ${len}`);
+        return;
+      }
       if (this.decodeBuffer.length < 4 + len) {
         return;
       }
       const payload = this.decodeBuffer.subarray(4, 4 + len);
       this.decodeBuffer = this.decodeBuffer.subarray(4 + len);
-      const parsed = JSON.parse(payload.toString("utf8")) as NativeEventMessage | NativeHelloMessage;
+      let parsed: NativeEventMessage | NativeHelloMessage;
+      try {
+        parsed = JSON.parse(payload.toString("utf8")) as NativeEventMessage | NativeHelloMessage;
+      } catch (error) {
+        void this.handleDecoderFailure(`invalid native JSON frame: ${String(error)}`);
+        return;
+      }
       void this.handleNativeMessage(parsed).catch((error) => {
         this.emit({ type: "error", code: "protocol_error", message: String(error), recoverable: false });
       });
@@ -269,6 +277,60 @@ export class NativeStreamerManager {
     frame.writeUInt32BE(payload.length, 0);
     payload.copy(frame, 4);
     this.socket.write(frame);
+  }
+
+  private sendWithCallback(socket: net.Socket, message: NativeControlMessage): Promise<void> {
+    if (socket.destroyed) {
+      return Promise.resolve();
+    }
+    const payload = Buffer.from(JSON.stringify(message), "utf8");
+    const frame = Buffer.allocUnsafe(payload.length + 4);
+    frame.writeUInt32BE(payload.length, 0);
+    payload.copy(frame, 4);
+    return new Promise<void>((resolve, reject) => {
+      socket.write(frame, (error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+
+  private async closeSocketGracefully(reason: string | null): Promise<void> {
+    const socket = this.socket;
+    this.socket = null;
+    if (!socket) {
+      return;
+    }
+    try {
+      await Promise.race([
+        this.sendWithCallback(socket, { type: "stop_session", reason }),
+        new Promise<void>((resolve) => setTimeout(resolve, NativeStreamerManager.STOP_FLUSH_TIMEOUT_MS)),
+      ]);
+    } catch (error) {
+      this.emit({ type: "error", code: "socket_write_error", message: String(error), recoverable: false });
+    }
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        socket.destroy();
+        resolve();
+      };
+      socket.once("close", finish);
+      socket.once("error", finish);
+      socket.end(() => finish());
+      setTimeout(finish, NativeStreamerManager.STOP_FLUSH_TIMEOUT_MS);
+    });
+  }
+
+  private async handleDecoderFailure(message: string): Promise<void> {
+    this.emit({ type: "error", code: "protocol_error", message, recoverable: false });
+    this.decodeBuffer = Buffer.alloc(0);
+    await this.stop({ reason: "protocol error" }).catch(() => {});
   }
 
   private emit(event: MainToRendererNativeStreamerEvent): void {
