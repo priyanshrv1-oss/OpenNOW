@@ -734,6 +734,7 @@ export function App(): JSX.Element {
   const [queuePosition, setQueuePosition] = useState<number | undefined>();
   const [navbarActiveSession, setNavbarActiveSession] = useState<ActiveSessionInfo | null>(null);
   const [isResumingNavbarSession, setIsResumingNavbarSession] = useState(false);
+  const [isTerminatingNavbarSession, setIsTerminatingNavbarSession] = useState(false);
   const [launchError, setLaunchError] = useState<LaunchErrorState | null>(null);
   const [queueModalGame, setQueueModalGame] = useState<GameInfo | null>(null);
   const [queueModalData, setQueueModalData] = useState<PrintedWasteQueueData | null>(null);
@@ -2716,6 +2717,40 @@ export function App(): JSX.Element {
     streamStatus,
   ]);
 
+  const handleTerminateNavbarSession = useCallback(async () => {
+    if (!navbarActiveSession || isTerminatingNavbarSession || isResumingNavbarSession) {
+      return;
+    }
+    const token = authSession?.tokens.idToken ?? authSession?.tokens.accessToken;
+    if (!token) {
+      return;
+    }
+
+    setIsTerminatingNavbarSession(true);
+    try {
+      await window.openNow.stopSession({
+        token,
+        streamingBaseUrl: effectiveStreamingBaseUrl,
+        serverIp: navbarActiveSession.serverIp,
+        zone: "prod",
+        sessionId: navbarActiveSession.sessionId,
+      });
+      setNavbarActiveSession(null);
+      void refreshNavbarActiveSession();
+    } catch (error) {
+      console.error("Terminate remote session failed:", error);
+    } finally {
+      setIsTerminatingNavbarSession(false);
+    }
+  }, [
+    authSession,
+    effectiveStreamingBaseUrl,
+    isResumingNavbarSession,
+    isTerminatingNavbarSession,
+    navbarActiveSession,
+    refreshNavbarActiveSession,
+  ]);
+
   // Stop stream handler
   const handleStopStream = useCallback(async () => {
     try {
@@ -3336,8 +3371,12 @@ export function App(): JSX.Element {
           activeSession={navbarActiveSession}
           activeSessionGameTitle={activeSessionGameTitle}
           isResumingSession={isResumingNavbarSession}
+          isTerminatingSession={isTerminatingNavbarSession}
           onResumeSession={() => {
             void handleResumeFromNavbar();
+          }}
+          onTerminateSession={() => {
+            void handleTerminateNavbarSession();
           }}
           onLogout={handleLogout}
         />
