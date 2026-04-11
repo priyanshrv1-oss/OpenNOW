@@ -3091,6 +3091,7 @@ export function App(): JSX.Element {
               toggleStats: formatShortcutForDisplay(settings.shortcutToggleStats, isMac),
               togglePointerLock: formatShortcutForDisplay(settings.shortcutTogglePointerLock, isMac),
               stopStream: formatShortcutForDisplay(settings.shortcutStopStream, isMac),
+              toggleAntiAfk: shortcuts.toggleAntiAfk.canonical,
               toggleMicrophone: formatShortcutForDisplay(settings.shortcutToggleMicrophone, isMac),
               screenshot: shortcuts.screenshot.canonical,
               recording: shortcuts.recording.canonical,
