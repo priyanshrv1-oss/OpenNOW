@@ -1,43 +1,47 @@
 # OpenNOW Native Streamer
 
-`OpenNOW Native Streamer` is a standalone Rust project that provides the foundation for a separate native streaming process and window for OpenNOW.
+`OpenNOW Native Streamer` is the standalone Rust native streaming backend for OpenNOW. It runs as a separate process and opens its own native window titled `OpenNOW Native Streamer`.
 
 ## Why Rust + GStreamer
 
 - Rust keeps the control plane explicit, typed, and maintainable across Windows, macOS, Linux, and Linux ARM.
-- GStreamer remains the intended media/rendering backbone for decode, audio playback, and future platform-specific acceleration.
-- The process split preserves the existing Electron/Chromium streaming path as a fallback while enabling a native transport and window architecture.
+- GStreamer provides the real media transport/decoding backbone for the native path.
+- The process split keeps the existing Electron/Chromium path intact as a fallback while allowing a real native transport and window.
 
 ## Ownership split
 
-- Electron main process keeps CloudMatch session creation, polling, claiming, stopping, and the NVST signaling WebSocket.
-- This Rust process owns native process lifecycle, protocol-sensitive SDP handling, native window/media runtime bootstrapping, and input packet encoding.
-- Electron main and the native process communicate over a versioned framed JSON IPC channel over a local Unix socket or named pipe.
+- Electron main process owns CloudMatch session creation, polling, claiming, stopping, and the NVST signaling WebSocket.
+- This Rust process owns the native window, WebRTC media runtime, audio/video playback, and native input transport.
+- Electron main and the native process communicate over a framed JSON IPC channel over a local Unix socket or named pipe.
 
-## Current foundation scope
+## Native path
 
-Implemented in this project:
+Implemented here:
 
-- versioned local IPC framing and message codec
-- SDP helper port for `extractPublicIp()`, `fixServerIp()`, codec filtering, H.265 normalization, answer munging, NVST SDP generation, and partial-reliability parsing
-- input packet encoder covering keyboard, mouse, wheel, and controller/gamepad packet layout
-- controller that receives offers/ICE via IPC, produces local answer + manual ICE, and emits state/stats/log/error events
-- media runtime abstraction with an optional GStreamer-backed implementation (`--features gstreamer-backend`) and a CI-safe stub backend when GStreamer development libraries are unavailable
+- framed JSON IPC handshake and control protocol
+- GFN SDP helpers for public-IP extraction, server-IP fixing, codec preference, H.265 normalization, answer munging, NVST SDP generation, and partial-reliability parsing
+- GStreamer `webrtcbin` offer/answer handling and ICE forwarding
+- manual ICE candidate injection from `mediaConnectionInfo`
+- separate native window titled `OpenNOW Native Streamer`
+- decoded video rendering into the native window via GTK4 `Picture`
+- audio playback through a native audio sink
+- keyboard, mouse, wheel, and controller/gamepad input capture and packet transmission over native data channels
 
-Not yet migrated in this task foundation:
+When `enableNativeStreamer` is `false`, OpenNOW keeps using the existing Chromium/WebRTC renderer path unchanged. When it is `true`, Electron main launches this separate process/window and forwards signaling over the local IPC channel.
 
-- real decoder/render sink hookup to the negotiated RTP stream
-- production controller/window toolkit integration
-- microphone parity beyond architecture scaffolding
-- screenshots/recording migration
-- HDR and 10-bit output polish
+Deferred / known limitations:
+
+- microphone parity is still out of scope in this task
+- screenshot / recording migration stays on the Electron/browser path
+- hardware-decoder selection is still capability-driven and platform-specific rather than fully tuned per target
+- controller mapping is currently focused on XInput-like semantics used by the existing client path
 
 ## Platform notes
 
-- Windows: architecture expects D3D11/Media Foundation style decode probing.
-- macOS: architecture expects VideoToolbox-backed decode probing.
-- Linux x64: architecture expects VA-API/NVDEC/software probing.
-- Linux ARM / Raspberry Pi: architecture keeps ARM-specific decode logic isolated so V4L2/stateless/software probing can be added without rewriting the control plane.
+- Windows: keep named-pipe IPC and decoder probing isolated so D3D11 / Media Foundation decode paths can be wired cleanly.
+- macOS: keep platform-specific decode probing isolated for VideoToolbox-backed paths.
+- Linux x64: current runtime is exercised here and uses GStreamer-native decode / sink selection.
+- Linux ARM / Raspberry Pi: platform modules remain isolated so V4L2/stateless/software probe paths can be extended without rewriting the control plane.
 
 ## Development
 
@@ -47,14 +51,20 @@ Run tests:
 cargo test --manifest-path opennow-native-streamer/Cargo.toml
 ```
 
+Prepare the production-shaped binary that Electron packages under `resources/native-streamer/`:
+
+```bash
+npm --prefix opennow-stable run native-streamer:prepare
+```
+
+Run the local Electron end-to-end verification harness for the native path:
+
+```bash
+xvfb-run -a npm --prefix opennow-stable run native-streamer:e2e
+```
+
 Run the native process directly against a controller-created socket:
 
 ```bash
 cargo run --manifest-path opennow-native-streamer/Cargo.toml -- --ipc-endpoint /tmp/opennow-native-streamer.sock
-```
-
-Enable the GStreamer-backed runtime when the machine has GStreamer development libraries installed:
-
-```bash
-cargo test --manifest-path opennow-native-streamer/Cargo.toml --features gstreamer-backend
 ```

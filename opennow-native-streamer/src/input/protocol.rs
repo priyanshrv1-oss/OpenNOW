@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 pub const INPUT_HEARTBEAT: u32 = 2;
 pub const INPUT_KEY_DOWN: u32 = 3;
 pub const INPUT_KEY_UP: u32 = 4;
@@ -7,13 +9,31 @@ pub const INPUT_MOUSE_BUTTON_UP: u32 = 9;
 pub const INPUT_MOUSE_WHEEL: u32 = 10;
 pub const INPUT_GAMEPAD: u32 = 12;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum InputPacketEnvelope {
     Heartbeat,
-    Keyboard { down: bool, keycode: u16, scancode: u16, modifiers: u16, timestamp_us: u64 },
-    MouseMove { dx: i16, dy: i16, timestamp_us: u64 },
-    MouseButton { down: bool, button: u8, timestamp_us: u64 },
-    MouseWheel { delta: i16, timestamp_us: u64 },
+    Keyboard {
+        down: bool,
+        keycode: u16,
+        scancode: u16,
+        modifiers: u16,
+        timestamp_us: u64,
+    },
+    MouseMove {
+        dx: i16,
+        dy: i16,
+        timestamp_us: u64,
+    },
+    MouseButton {
+        down: bool,
+        button: u8,
+        timestamp_us: u64,
+    },
+    MouseWheel {
+        delta: i16,
+        timestamp_us: u64,
+    },
     Gamepad {
         controller_id: u16,
         buttons: u16,
@@ -38,6 +58,10 @@ pub struct InputEncoder {
 impl InputEncoder {
     pub fn set_protocol_version(&mut self, version: u16) {
         self.protocol_version = version;
+    }
+
+    pub fn protocol_version(&self) -> u16 {
+        self.protocol_version
     }
 
     pub fn encode(&mut self, envelope: &InputPacketEnvelope) -> Vec<u8> {
@@ -101,7 +125,7 @@ impl InputEncoder {
                 bytes[20..22].copy_from_slice(&right_stick_x.to_le_bytes());
                 bytes[22..24].copy_from_slice(&right_stick_y.to_le_bytes());
                 bytes[26..28].copy_from_slice(&85u16.to_le_bytes());
-                bytes[30..38].copy_from_slice(&timestamp_us.to_le_bytes());
+                bytes[30..38].copy_from_slice(&timestamp_us.to_be_bytes());
                 if *use_partially_reliable {
                     self.wrap_gamepad_pr(*controller_id as usize, bytes)
                 } else {
@@ -161,7 +185,13 @@ mod tests {
     fn encodes_keyboard_with_v3_wrapper() {
         let mut enc = InputEncoder::default();
         enc.set_protocol_version(3);
-        let packet = enc.encode(&InputPacketEnvelope::Keyboard { down: true, keycode: 0x41, scancode: 0x04, modifiers: 0x02, timestamp_us: 10 });
+        let packet = enc.encode(&InputPacketEnvelope::Keyboard {
+            down: true,
+            keycode: 0x41,
+            scancode: 0x04,
+            modifiers: 0x02,
+            timestamp_us: 10,
+        });
         assert_eq!(packet[0], 0x23);
         assert_eq!(packet[9], 0x22);
         assert_eq!(&packet[10..14], &INPUT_KEY_DOWN.to_le_bytes());
@@ -171,7 +201,19 @@ mod tests {
     fn encodes_gamepad_partially_reliable_header() {
         let mut enc = InputEncoder::default();
         enc.set_protocol_version(3);
-        let packet = enc.encode(&InputPacketEnvelope::Gamepad { controller_id: 1, buttons: 0x1000, left_trigger: 1, right_trigger: 2, left_stick_x: 3, left_stick_y: 4, right_stick_x: 5, right_stick_y: 6, bitmap: 1, use_partially_reliable: true, timestamp_us: 99 });
+        let packet = enc.encode(&InputPacketEnvelope::Gamepad {
+            controller_id: 1,
+            buttons: 0x1000,
+            left_trigger: 1,
+            right_trigger: 2,
+            left_stick_x: 3,
+            left_stick_y: 4,
+            right_stick_x: 5,
+            right_stick_y: 6,
+            bitmap: 1,
+            use_partially_reliable: true,
+            timestamp_us: 99,
+        });
         assert_eq!(packet[9], 0x26);
         assert_eq!(packet[10], 1);
         assert_eq!(packet[13], 0x21);

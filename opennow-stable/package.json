@@ -16,12 +16,15 @@
   "main": "dist-electron/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "build": "npm run native-streamer:prepare && electron-vite build",
     "preview": "electron-vite preview",
     "dist": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder",
     "dist:signed": "npm run build && electron-builder",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.json",
-    "native-streamer:test": "cargo test --manifest-path ../opennow-native-streamer/Cargo.toml"
+    "native-streamer:test": "cargo test --manifest-path ../opennow-native-streamer/Cargo.toml",
+    "native-streamer:prepare": "node ./scripts/prepare-native-streamer.mjs",
+    "native-streamer:e2e": "node ./scripts/native-streamer-e2e.mjs",
+    "chromium-stream:e2e": "node ./scripts/run-electron-script.mjs chromium-stream-e2e.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.7.0",
@@ -63,8 +66,16 @@
     "files": [
       "dist/**",
       "dist-electron/**",
-      "package.json",
-      "../opennow-native-streamer/target/debug/opennow-native-streamer*"
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "native-bin",
+        "to": "native-streamer",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "asar": true,
     "win": {

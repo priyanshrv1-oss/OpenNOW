@@ -1,0 +1,37 @@
+<!doctype html><html><body><video id="v" autoplay playsinline muted></video><audio id="a" autoplay></audio><script>
+const video = document.getElementById("v");
+const audio = document.getElementById("a");
+const pc = new RTCPeerConnection({ iceServers: [] });
+const remoteStream = new MediaStream();
+video.srcObject = remoteStream;
+audio.srcObject = remoteStream;
+pc.ontrack = (event) => {
+  remoteStream.addTrack(event.track);
+  if (event.track.kind === "video") {
+    window.e2e.send("e2e:client-video-track", {});
+  }
+  if (event.track.kind === "audio") {
+    window.e2e.send("e2e:client-audio-track", {});
+  }
+};
+pc.ondatachannel = (event) => {
+  event.channel.onmessage = () => window.e2e.send("e2e:client-data", { channel: event.channel.label });
+};
+pc.onicecandidate = (event) => {
+  if (event.candidate) window.e2e.send("e2e:client-ice", {
+    candidate: event.candidate.candidate,
+    sdpMid: event.candidate.sdpMid,
+    sdpMLineIndex: event.candidate.sdpMLineIndex,
+    usernameFragment: event.candidate.usernameFragment,
+  });
+};
+window.e2e.on("e2e:offer", async ({ sdp }) => {
+  await pc.setRemoteDescription({ type: "offer", sdp });
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  window.e2e.send("e2e:client-answer", { sdp: answer.sdp });
+});
+window.e2e.on("e2e:remote-ice", async (candidate) => {
+  try { await pc.addIceCandidate(candidate); } catch {}
+});
+</script></body></html>

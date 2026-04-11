@@ -292,10 +292,22 @@ export class NativeStreamerManager {
     if (explicit && existsSync(explicit)) {
       return explicit;
     }
-    const base = resolve(app.getAppPath(), "..");
-    const devBinary = join(base, "opennow-native-streamer", "target", "debug", process.platform === "win32" ? "opennow-native-streamer.exe" : "opennow-native-streamer");
-    if (existsSync(devBinary)) {
-      return devBinary;
+    const executableName = process.platform === "win32" ? "opennow-native-streamer.exe" : "opennow-native-streamer";
+    const platformDir = `${process.platform}-${process.arch}`;
+    const candidatePaths = app.isPackaged
+      ? [
+          join(process.resourcesPath, "native-streamer", platformDir, executableName),
+          join(process.resourcesPath, "native-streamer", executableName),
+        ]
+      : [
+          join(resolve(app.getAppPath(), ".."), "native-bin", platformDir, executableName),
+          join(resolve(app.getAppPath(), ".."), "..", "opennow-native-streamer", "target", "release", executableName),
+          join(resolve(app.getAppPath(), ".."), "..", "opennow-native-streamer", "target", "debug", executableName),
+        ];
+    for (const candidate of candidatePaths) {
+      if (existsSync(candidate)) {
+        return candidate;
+      }
     }
     return process.platform === "win32" ? "cargo.exe" : "cargo";
   }

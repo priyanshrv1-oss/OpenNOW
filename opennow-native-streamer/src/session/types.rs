@@ -1,17 +1,19 @@
-#[derive(Debug, Clone, PartialEq, Eq)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IceServer {
     pub urls: Vec<String>,
     pub username: Option<String>,
     pub credential: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MediaConnectionInfo {
     pub ip: String,
     pub port: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionInfo {
     pub session_id: String,
     pub server_ip: String,
@@ -24,7 +26,7 @@ pub struct SessionInfo {
     pub gpu_type: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StreamSettings {
     pub resolution: String,
     pub fps: u32,
@@ -32,11 +34,13 @@ pub struct StreamSettings {
     pub codec: String,
     pub color_quality: String,
     pub decoder_preference: Option<String>,
-    pub mouse_sensitivity_milli: u32,
+    #[serde(default)]
+    pub mouse_sensitivity: u32,
+    #[serde(default)]
     pub mouse_acceleration: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NativeSessionConfig {
     pub session: SessionInfo,
     pub settings: StreamSettings,

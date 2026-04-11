@@ -1,0 +1,50 @@
+<!doctype html><html><body><script>
+const pc = new RTCPeerConnection({ iceServers: [] });
+const canvas = document.createElement("canvas");
+canvas.width = 640;
+canvas.height = 360;
+const ctx = canvas.getContext("2d");
+let tick = 0;
+setInterval(() => {
+  tick += 1;
+  ctx.fillStyle = tick % 2 ? "#7c3aed" : "#059669";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#fff";
+  ctx.font = "48px sans-serif";
+  ctx.fillText("Chromium fallback", 32, 96);
+  ctx.fillText(String(tick), 32, 160);
+}, 33);
+const videoStream = canvas.captureStream(30);
+for (const track of videoStream.getTracks()) pc.addTrack(track, videoStream);
+const ac = new AudioContext();
+const osc = ac.createOscillator();
+const gain = ac.createGain();
+gain.gain.value = 0.05;
+const dest = ac.createMediaStreamDestination();
+osc.connect(gain);
+gain.connect(dest);
+osc.start();
+for (const track of dest.stream.getTracks()) pc.addTrack(track, dest.stream);
+const channel = pc.createDataChannel("browser_control");
+channel.onopen = () => channel.send("fallback-ok");
+pc.onicecandidate = (event) => {
+  if (event.candidate) window.e2e.send("e2e:peer-ice", {
+    candidate: event.candidate.candidate,
+    sdpMid: event.candidate.sdpMid,
+    sdpMLineIndex: event.candidate.sdpMLineIndex,
+    usernameFragment: event.candidate.usernameFragment,
+  });
+};
+window.e2e.on("e2e:answer", async ({ sdp }) => {
+  await pc.setRemoteDescription({ type: "answer", sdp });
+});
+window.e2e.on("e2e:remote-ice", async (candidate) => {
+  try { await pc.addIceCandidate(candidate); } catch {}
+});
+(async () => {
+  await ac.resume();
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  window.e2e.send("e2e:peer-offer", { sdp: offer.sdp });
+})();
+</script></body></html>

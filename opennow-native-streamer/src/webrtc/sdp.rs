@@ -175,11 +175,11 @@ pub fn prefer_codec(sdp: &str, codec: &str, options: &CodecPreferenceOptions) ->
         }
         out.push(line);
     }
-    out.join("\n")
+    normalize_sdp_line_endings(&out.join("\n"))
 }
 
 pub fn rewrite_h265_tier_flag(sdp: &str, tier_flag: u8) -> String {
-    sdp.replace("tier-flag=1", &format!("tier-flag={tier_flag}"))
+    normalize_sdp_line_endings(&sdp.replace("tier-flag=1", &format!("tier-flag={tier_flag}")))
 }
 
 pub fn rewrite_h265_level_id_by_profile(sdp: &str, max_level_by_profile: &BTreeMap<u8, u32>) -> String {
@@ -205,7 +205,7 @@ pub fn rewrite_h265_level_id_by_profile(sdp: &str, max_level_by_profile: &BTreeM
         }
         out.push(line.to_string());
     }
-    out.join("\n")
+    normalize_sdp_line_endings(&out.join("\n"))
 }
 
 pub fn munge_answer_sdp(sdp: &str, max_bitrate_kbps: u32) -> String {
@@ -225,14 +225,14 @@ pub fn munge_answer_sdp(sdp: &str, max_bitrate_kbps: u32) -> String {
             }
         }
     }
-    out.join("\n")
+    normalize_sdp_line_endings(&out.join("\n"))
 }
 
 pub fn build_nvst_sdp(params: &NvstParams) -> String {
     let min_bitrate = (params.max_bitrate_kbps as f32 * 0.35).floor().max(5000.0) as u32;
     let initial_bitrate = (params.max_bitrate_kbps as f32 * 0.7).floor().max(min_bitrate as f32) as u32;
     let bit_depth = if params.color_quality.starts_with("10bit") { 10 } else { 8 };
-    [
+    normalize_sdp_line_endings(&[
         "v=0".to_string(),
         "o=SdpTest test_id_13 14 IN IPv4 127.0.0.1".to_string(),
         "s=-".to_string(),
@@ -260,7 +260,17 @@ pub fn build_nvst_sdp(params: &NvstParams) -> String {
         format!("a=ri.partialReliableThresholdMs:{}", params.partial_reliable_threshold_ms),
         String::new(),
     ]
-    .join("\n")
+    .join("\n"))
+}
+
+pub fn normalize_sdp_line_endings(sdp: &str) -> String {
+    let lines: Vec<&str> = sdp.lines().collect();
+    if lines.is_empty() {
+        return String::new();
+    }
+    let mut out = lines.join("\r\n");
+    out.push_str("\r\n");
+    out
 }
 
 pub fn build_manual_ice_candidates(media: &Option<MediaConnectionInfo>, server_ufrag: &str) -> Vec<String> {

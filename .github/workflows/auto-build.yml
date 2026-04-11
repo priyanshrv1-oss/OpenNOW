@@ -83,7 +83,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y fakeroot rpm
+          sudo apt-get install -y fakeroot rpm xvfb xdotool gstreamer1.0-nice
       - name: Install FPM for arm64 deb builds
         if: matrix.label == 'linux-arm64'
         run: sudo apt-get install -y ruby ruby-dev build-essential && sudo gem install fpm
@@ -104,6 +104,10 @@ jobs:
 
       - name: Build app bundles
         run: npm run build
+
+      - name: Run native streamer Electron end-to-end check
+        if: matrix.label == 'linux-x64'
+        run: xvfb-run -a npm run native-streamer:e2e
 
       - name: Package installers
         run: npx electron-builder --publish never ${{ matrix.builder_args }}

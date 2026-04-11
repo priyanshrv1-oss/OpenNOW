@@ -524,6 +524,12 @@ function emitToRenderer(event: MainToRendererSignalingEvent): void {
   }
 }
 
+function emitNativeToRenderer(event: MainToRendererNativeStreamerEvent): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(IPC_CHANNELS.NATIVE_STREAMER_EVENT, event);
+  }
+}
+
 async function createMainWindow(): Promise<void> {
   const preloadMjsPath = join(__dirname, "../preload/index.mjs");
   const preloadJsPath = join(__dirname, "../preload/index.js");
@@ -1111,7 +1117,17 @@ function registerIpcHandlers(): void {
         payload.signalingUrl,
       );
       signalingClientKey = nextKey;
-      signalingClient.onEvent(emitToRenderer);
+      signalingClient.onEvent((event) => {
+        emitToRenderer(event);
+        void nativeStreamerManager?.handleSignalingEvent(event).catch((error) => {
+          emitNativeToRenderer({
+            type: "error",
+            code: "native_signaling_forward",
+            message: String(error),
+            recoverable: false,
+          });
+        });
+      });
       await signalingClient.connect();
     },
   );
@@ -1596,6 +1612,21 @@ app.whenReady().then(async () => {
   await authService.initialize();
 
   settingsManager = getSettingsManager();
+  nativeStreamerManager = new NativeStreamerManager(
+    () => mainWindow,
+    async (payload) => {
+      if (!signalingClient) {
+        throw new Error("Signaling is not connected");
+      }
+      await signalingClient.sendAnswer(payload);
+    },
+    async (payload) => {
+      if (!signalingClient) {
+        throw new Error("Signaling is not connected");
+      }
+      await signalingClient.sendIceCandidate(payload);
+    },
+  );
 
   // Set up permission handlers for getUserMedia, fullscreen, pointer lock
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
@@ -1676,6 +1707,7 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   refreshScheduler.stop();
+  void nativeStreamerManager?.stop({ reason: "app quit" }).catch(() => {});
   signalingClient?.disconnect();
   signalingClient = null;
   signalingClientKey = null;

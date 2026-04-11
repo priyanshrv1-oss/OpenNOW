@@ -33,6 +33,7 @@ npm run dist
 ## Technical Notes
 
 - WebRTC relies on Chromium's built-in stack
+- The optional native streamer path packages a separate Rust + GStreamer binary under `native-bin/` during build and ships it as an Electron extra resource
 - `ws` is used in the main process for custom signaling behavior
 - Authentication uses an OAuth PKCE flow with a localhost callback
 - Settings are persisted locally through `electron-store`

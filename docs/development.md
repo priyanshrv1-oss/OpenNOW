@@ -57,7 +57,7 @@ opennow-stable/
 ├── package.json
 └── tsconfig*.json
 opennow-native-streamer/
-├── src/             Rust native streamer foundation
+├── src/             Rust native streamer runtime
 └── tests/           Rust protocol and IPC tests
 ```
 
