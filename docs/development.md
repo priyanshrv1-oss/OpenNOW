@@ -126,6 +126,15 @@ npm run typecheck
 cargo test --manifest-path opennow-native-streamer/Cargo.toml
 ```
 
+### Build and verify the native streamer in development
+
+```bash
+cd opennow-stable
+npm run native-streamer:prepare
+npm run native-streamer:e2e
+npm run chromium-stream:e2e
+```
+
 ### Build production bundles
 
 ```bash
@@ -165,6 +174,58 @@ Current build matrix:
 | macOS arm64 | `dmg`, `zip` |
 | Linux x64 | `AppImage`, `deb` |
 | Linux ARM64 | `AppImage`, `deb` |
+
+### Windows native-streamer artifact
+
+For the Rust + GStreamer backend, the repository also includes @/.github/workflows/native-streamer-windows.yml.
+
+That workflow:
+
+- runs on Windows
+- installs the GStreamer MSVC SDK
+- runs `cargo test --manifest-path opennow-native-streamer/Cargo.toml`
+- builds `opennow-native-streamer.exe` in release mode
+- uploads an artifact named `opennow-native-streamer-windows-x64`
+
+Artifact layout:
+
+- `native-bin/win32-x64/opennow-native-streamer.exe`
+- `README.txt`
+
+Use that artifact by copying the executable into:
+
+- `opennow-stable/native-bin/win32-x64/opennow-native-streamer.exe`
+
+or by pointing `OPENNOW_NATIVE_STREAMER_BIN` at the downloaded executable.
+
+### Local Windows fallback build
+
+If you are building the Windows native streamer locally instead of downloading the CI artifact:
+
+1. Install Visual Studio Build Tools with MSVC C++
+2. Install Rust stable MSVC:
+   - `rustup default stable-x86_64-pc-windows-msvc`
+3. Install the 64-bit GStreamer MSVC runtime and development packages to:
+   - `C:\gstreamer\1.0\msvc_x86_64`
+4. Set:
+
+```powershell
+$env:GSTREAMER_1_0_ROOT_MSVC_X86_64="C:\gstreamer\1.0\msvc_x86_64"
+$env:PKG_CONFIG_PATH="$env:GSTREAMER_1_0_ROOT_MSVC_X86_64\lib\pkgconfig"
+$env:PATH="$env:GSTREAMER_1_0_ROOT_MSVC_X86_64\bin;$env:PATH"
+```
+
+5. Build from the repository root:
+
+```powershell
+cargo build --release --manifest-path opennow-native-streamer/Cargo.toml
+```
+
+6. Copy the output into:
+
+```powershell
+opennow-stable\native-bin\win32-x64\opennow-native-streamer.exe
+```
 
 ## Notes For Contributors
 

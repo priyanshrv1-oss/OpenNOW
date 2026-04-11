@@ -18,6 +18,8 @@ import type {
   SubscriptionInfo,
   StreamRegion,
   VideoCodec,
+  PrintedWasteQueueData,
+  PrintedWasteServerMapping,
 } from "@shared/gfn";
 import {
   DEFAULT_KEYBOARD_LAYOUT,
@@ -54,6 +56,7 @@ import { StreamLoading } from "./components/StreamLoading";
 import { ControllerStreamLoading } from "./components/ControllerStreamLoading";
 import type { QueueAdPlaybackEvent, QueueAdPreviewHandle } from "./components/QueueAdPreview";
 import { StreamView } from "./components/StreamView";
+import { QueueServerSelectModal } from "./components/QueueServerSelectModal";
 
 const codecOptions: VideoCodec[] = [...USER_FACING_VIDEO_CODEC_OPTIONS];
 const DEFAULT_STREAM_PREFERENCES = getDefaultStreamPreferences();
@@ -131,6 +134,19 @@ type QueueAdReportOptions = {
 const APP_PAGE_ORDER: AppPage[] = ["home", "library", "settings"];
 
 const isMac = navigator.platform.toLowerCase().includes("mac");
+
+function isStandardPrintedWasteZone(zoneId: string): boolean {
+  return zoneId.startsWith("NP-") && !zoneId.startsWith("NPA-");
+}
+
+function hasAnyEligiblePrintedWasteZone(
+  queueData: PrintedWasteQueueData,
+  mapping: PrintedWasteServerMapping,
+): boolean {
+  return Object.keys(queueData).some((zoneId) => (
+    isStandardPrintedWasteZone(zoneId) && mapping[zoneId]?.nuked !== true
+  ));
+}
 
 const DEFAULT_SHORTCUTS = {
   shortcutToggleStats: "F3",
@@ -694,6 +710,7 @@ export function App(): JSX.Element {
     gameLanguage: "en_US",
     enableL4S: false,
     enableNativeStreamer: false,
+    discordRichPresence: false,
   });
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [codecResults, setCodecResults] = useState<CodecTestResult[] | null>(() => loadStoredCodecResults());
@@ -720,6 +737,8 @@ export function App(): JSX.Element {
   const [navbarActiveSession, setNavbarActiveSession] = useState<ActiveSessionInfo | null>(null);
   const [isResumingNavbarSession, setIsResumingNavbarSession] = useState(false);
   const [launchError, setLaunchError] = useState<LaunchErrorState | null>(null);
+  const [queueModalGame, setQueueModalGame] = useState<GameInfo | null>(null);
+  const [queueModalData, setQueueModalData] = useState<PrintedWasteQueueData | null>(null);
   const [sessionStartedAtMs, setSessionStartedAtMs] = useState<number | null>(null);
   const [remoteStreamWarning, setRemoteStreamWarning] = useState<StreamWarningState | null>(null);
   const [localSessionTimerWarning, setLocalSessionTimerWarning] = useState<LocalSessionTimerWarningState | null>(null);
@@ -2336,7 +2355,7 @@ export function App(): JSX.Element {
   }, [authSession, effectiveStreamingBaseUrl, findGameContextForSession, resetStatsOverlayToPreference, settings]);
 
   // Play game handler
-  const handlePlayGame = useCallback(async (game: GameInfo, options?: { bypassGuards?: boolean }) => {
+  const handlePlayGame = useCallback(async (game: GameInfo, options?: { bypassGuards?: boolean; streamingBaseUrl?: string }) => {
     if (!selectedProvider) return;
 
     console.log("handlePlayGame entry", {
@@ -2451,7 +2470,7 @@ export function App(): JSX.Element {
       // Create new session
       const newSession = await window.openNow.createSession({
         token: token || undefined,
-        streamingBaseUrl: effectiveStreamingBaseUrl,
+        streamingBaseUrl: options?.streamingBaseUrl || effectiveStreamingBaseUrl,
         appId,
         internalTitle: game.title,
         accountLinked: game.playType !== "INSTALL_TO_PLAY",
@@ -2647,6 +2666,74 @@ export function App(): JSX.Element {
     streamStatus,
     variantByGameId,
   ]);
+
+  // Gate handler: shows queue server modal for FREE-tier users before launching
+  const handleInitiatePlay = useCallback(async (game: GameInfo) => {
+    const effectiveTier = normalizeMembershipTier(
+      subscriptionInfo?.membershipTier ?? authSession?.user.membershipTier,
+    );
+    const isFreeUser = effectiveTier === "FREE";
+    if (isFreeUser && streamStatus === "idle" && !launchInFlightRef.current) {
+      try {
+        const [queueResult, mappingResult] = await Promise.allSettled([
+          window.openNow.fetchPrintedWasteQueue(),
+          window.openNow.fetchPrintedWasteServerMapping(),
+        ]);
+
+        if (queueResult.status !== "fulfilled" || mappingResult.status !== "fulfilled") {
+          console.warn(
+            "[QueueServerSelect] PrintedWaste unavailable, skipping queue checks and launching with default routing.",
+            {
+              queueStatus: queueResult.status,
+              mappingStatus: mappingResult.status,
+            },
+          );
+          setQueueModalData(null);
+          void handlePlayGame(game);
+          return;
+        }
+
+        const queueData = queueResult.value;
+        if (!queueData || Object.keys(queueData).length === 0) {
+          setQueueModalData(null);
+          void handlePlayGame(game);
+          return;
+        }
+
+        if (!hasAnyEligiblePrintedWasteZone(queueData, mappingResult.value)) {
+          console.warn(
+            "[QueueServerSelect] No eligible non-nuked PrintedWaste zones available, skipping queue checks.",
+          );
+          setQueueModalData(null);
+          void handlePlayGame(game);
+          return;
+        }
+
+        setQueueModalData(queueData);
+        setQueueModalGame(game);
+      } catch (error) {
+        console.warn("[QueueServerSelect] PrintedWaste queue checks failed, launching without modal.", error);
+        setQueueModalData(null);
+        void handlePlayGame(game);
+      }
+      return;
+    }
+    void handlePlayGame(game);
+  }, [subscriptionInfo, authSession, streamStatus, handlePlayGame]);
+
+  const handleQueueModalConfirm = useCallback((zoneUrl: string | null) => {
+    const game = queueModalGame;
+    setQueueModalGame(null);
+    setQueueModalData(null);
+    if (game) {
+      void handlePlayGame(game, { streamingBaseUrl: zoneUrl ?? undefined });
+    }
+  }, [queueModalGame, handlePlayGame]);
+
+  const handleQueueModalCancel = useCallback(() => {
+    setQueueModalGame(null);
+    setQueueModalData(null);
+  }, []);
 
   const handleResumeFromNavbar = useCallback(async () => {
     if (!selectedProvider || !navbarActiveSession || isResumingNavbarSession) {
@@ -3344,7 +3431,7 @@ export function App(): JSX.Element {
             onSourceChange={loadGames}
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
-            onPlayGame={handlePlayGame}
+            onPlayGame={handleInitiatePlay}
             isLoading={isLoadingGames}
             selectedGameId={selectedGameId}
             onSelectGame={setSelectedGameId}
@@ -3357,7 +3444,7 @@ export function App(): JSX.Element {
           settings.controllerMode ? (
             <ControllerLibraryPage
               games={filteredLibraryGames}
-              onPlayGame={handlePlayGame}
+              onPlayGame={handleInitiatePlay}
               isLoading={isLoadingGames}
               selectedGameId={selectedGameId}
               onSelectGame={setSelectedGameId}
@@ -3404,7 +3491,7 @@ export function App(): JSX.Element {
               games={filteredLibraryGames}
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
-              onPlayGame={handlePlayGame}
+              onPlayGame={handleInitiatePlay}
               isLoading={isLoadingGames}
               selectedGameId={selectedGameId}
               onSelectGame={setSelectedGameId}
@@ -3432,6 +3519,15 @@ export function App(): JSX.Element {
           <span>B Back</span>
           <span>LB/RB Tabs</span>
         </div>
+      )}
+
+      {queueModalGame && streamStatus === "idle" && (
+        <QueueServerSelectModal
+          game={queueModalGame}
+          initialQueueData={queueModalData}
+          onConfirm={handleQueueModalConfirm}
+          onCancel={handleQueueModalCancel}
+        />
       )}
     </div>
   );

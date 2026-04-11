@@ -80,6 +80,8 @@ export interface Settings {
   enableL4S: boolean;
   /** Launch the separate Rust + GStreamer native streamer backend/window instead of the browser streamer */
   enableNativeStreamer: boolean;
+  /** Show the currently streaming game as Discord Rich Presence activity */
+  discordRichPresence: boolean;
 }
 
 const defaultStopShortcut = "Ctrl+Shift+Q";
@@ -128,6 +130,7 @@ const DEFAULT_SETTINGS: Settings = {
   gameLanguage: "en_US",
   enableL4S: false,
   enableNativeStreamer: false,
+  discordRichPresence: false,
 };
 
 export class SettingsManager {
