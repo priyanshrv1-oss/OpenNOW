@@ -1,8 +1,8 @@
 import { app } from "electron";
 import { join } from "node:path";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import type { VideoCodec, ColorQuality, VideoAccelerationPreference, MicrophoneMode, GameLanguage, AspectRatio } from "@shared/gfn";
-import { DEFAULT_CONTROLLER_THEME, clampControllerThemeChannel, normalizeControllerTheme } from "@shared/gfn";
+import type { VideoCodec, ColorQuality, VideoAccelerationPreference, MicrophoneMode, GameLanguage, AspectRatio, KeyboardLayout } from "@shared/gfn";
+import { DEFAULT_KEYBOARD_LAYOUT, getDefaultStreamPreferences, normalizeStreamPreferences } from "@shared/gfn";
 
 export interface Settings {
   /** Video resolution (e.g., "1920x1080") */
@@ -15,6 +15,10 @@ export interface Settings {
   maxBitrateMbps: number;
   /** Preferred video codec */
   codec: VideoCodec;
+  /** Preferred video decode acceleration mode */
+  decoderPreference: VideoAccelerationPreference;
+  /** Preferred video encode acceleration mode */
+  encoderPreference: VideoAccelerationPreference;
   /** Color quality (bit depth + chroma subsampling) */
   colorQuality: ColorQuality;
   /** Preferred region URL (empty = auto) */
@@ -49,6 +53,8 @@ export interface Settings {
   microphoneDeviceId: string;
   /** Hide stream buttons (mic/fullscreen/end-session) while streaming */
   hideStreamButtons: boolean;
+  /** Show the stats overlay automatically when a stream launches */
+  showStatsOnLaunch: boolean;
   /** Enable controller-first media bar layout for library browsing */
   controllerMode: boolean;
   /** Play subtle sounds in controller library mode */
@@ -64,10 +70,14 @@ export interface Settings {
   /** Automatically enter fullscreen when controller-mode triggers it */
   autoFullScreen: boolean;
   favoriteGameIds: string[];
+  /** Enable the live elapsed session counter */
+  sessionCounterEnabled: boolean;
   /** Window width */
   windowWidth: number;
   /** Window height */
   windowHeight: number;
+  /** Keyboard layout for mapping physical keys inside the remote session */
+  keyboardLayout: KeyboardLayout;
   /** In-game language setting (sent to GFN servers via languageCode parameter) */
   gameLanguage: GameLanguage;
   /** Experimental request for Low Latency, Low Loss, Scalable throughput on new sessions */
@@ -79,14 +89,17 @@ const defaultAntiAfkShortcut = "Ctrl+Shift+K";
 const defaultMicShortcut = "Ctrl+Shift+M";
 const LEGACY_STOP_SHORTCUTS = new Set(["META+SHIFT+Q", "CMD+SHIFT+Q"]);
 const LEGACY_ANTI_AFK_SHORTCUTS = new Set(["META+SHIFT+F10", "CMD+SHIFT+F10", "CTRL+SHIFT+F10"]);
+const DEFAULT_STREAM_PREFERENCES = getDefaultStreamPreferences();
 
 const DEFAULT_SETTINGS: Settings = {
   resolution: "1920x1080",
   aspectRatio: "16:9",
   fps: 60,
   maxBitrateMbps: 75,
-  codec: "H264",
-  colorQuality: "8bit_420",
+  codec: DEFAULT_STREAM_PREFERENCES.codec,
+  decoderPreference: "auto",
+  encoderPreference: "auto",
+  colorQuality: DEFAULT_STREAM_PREFERENCES.colorQuality,
   region: "",
   clipboardPaste: false,
   mouseSensitivity: 1,
@@ -101,6 +114,7 @@ const DEFAULT_SETTINGS: Settings = {
   microphoneMode: "disabled",
   microphoneDeviceId: "",
   hideStreamButtons: false,
+  showStatsOnLaunch: false,
   controllerMode: false,
   controllerUiSounds: false,
   controllerBackgroundAnimations: false,
@@ -110,10 +124,12 @@ const DEFAULT_SETTINGS: Settings = {
   autoLoadControllerLibrary: false,
   autoFullScreen: false,
   favoriteGameIds: [],
+  sessionCounterEnabled: false,
   sessionClockShowEveryMinutes: 60,
   sessionClockShowDurationSeconds: 30,
   windowWidth: 1400,
   windowHeight: 900,
+  keyboardLayout: DEFAULT_KEYBOARD_LAYOUT,
   gameLanguage: "en_US",
   enableL4S: false,
 };
@@ -187,15 +203,17 @@ export class SettingsManager {
   }
 
   private enforceCompatibility(settings: Settings): boolean {
-    if (settings.codec === "H264" && settings.colorQuality !== "8bit_420") {
-      console.warn(
-        `[Settings] colorQuality "${settings.colorQuality}" is incompatible with H264; resetting to 8bit_420`,
-      );
-      settings.colorQuality = "8bit_420";
-      return true;
+    const normalized = normalizeStreamPreferences(settings.codec, settings.colorQuality);
+    if (!normalized.migrated) {
+      return false;
     }
 
-    return false;
+    console.warn(
+      `[Settings] Migrating unsupported stream settings codec="${settings.codec}" colorQuality="${settings.colorQuality}" to ${normalized.codec}/${normalized.colorQuality}`,
+    );
+    settings.codec = normalized.codec;
+    settings.colorQuality = normalized.colorQuality;
+    return true;
   }
 
   private migrateLegacyShortcutDefaults(settings: Settings): boolean {
