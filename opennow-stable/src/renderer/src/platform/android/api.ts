@@ -96,7 +96,7 @@ interface LocalhostAuthPlugin {
 
 const LocalhostAuth = registerPlugin<LocalhostAuthPlugin>("LocalhostAuth");
 
-interface PersistedAuthState { session: AuthSession | null; selectedProvider: LoginProvider | null; }
+interface PersistedAuthState { session: AuthSession | null; selectedProvider: LoginProvider | null; preferredGfnToken?: "id" | "access"; }
 interface TokenResponse { access_token: string; refresh_token?: string; id_token?: string; client_token?: string; expires_in?: number; }
 interface ClientTokenResponse { client_token: string; expires_in?: number; }
 interface ServiceUrlsResponse { gfnServiceInfo?: { gfnServiceEndpoints?: Array<{ idpId: string; loginProviderCode: string; loginProviderDisplayName: string; streamingServiceUrl: string; loginProviderPriority?: number; }>; }; }
@@ -139,15 +139,17 @@ class AndroidAuthService {
   private providers: LoginProvider[] = [];
   private session: AuthSession | null = null;
   private selectedProvider: LoginProvider = defaultProvider();
+  private preferredGfnToken: "id" | "access" = "id";
 
   async initialize(): Promise<void> {
     const state = await readPreferenceJson<PersistedAuthState>(AUTH_STATE_KEY, { session: null, selectedProvider: null });
     if (state.selectedProvider) this.selectedProvider = normalizeProvider(state.selectedProvider);
     if (state.session) this.session = { ...state.session, provider: normalizeProvider(state.session.provider) };
+    this.preferredGfnToken = state.preferredGfnToken === "access" ? "access" : "id";
   }
 
   private async persist(): Promise<void> {
-    await writePreferenceJson(AUTH_STATE_KEY, { session: this.session, selectedProvider: this.selectedProvider });
+    await writePreferenceJson(AUTH_STATE_KEY, { session: this.session, selectedProvider: this.selectedProvider, preferredGfnToken: this.preferredGfnToken });
   }
 
   private pickAuthRedirectPort(): number {
@@ -177,6 +179,47 @@ class AndroidAuthService {
 
   getSession(): AuthSession | null { return this.session; }
   getSelectedProvider(): LoginProvider { return this.selectedProvider; }
+  private getProviderStreamingBaseUrl(explicit?: string): string {
+    if (explicit?.trim()) return normalizeBaseUrl(explicit);
+    if (this.session?.provider?.streamingServiceUrl) return normalizeBaseUrl(this.session.provider.streamingServiceUrl);
+    if (this.selectedProvider?.streamingServiceUrl) return normalizeBaseUrl(this.selectedProvider.streamingServiceUrl);
+    return DEFAULT_PROVIDER_STREAMING_URL;
+  }
+
+  private candidateGfnTokens(session: AuthSession): Array<{ type: "id" | "access"; token: string }> {
+    const out: Array<{ type: "id" | "access"; token: string }> = [];
+    if (this.preferredGfnToken === "id") {
+      if (session.tokens.idToken?.trim()) out.push({ type: "id", token: session.tokens.idToken.trim() });
+      if (session.tokens.accessToken?.trim()) out.push({ type: "access", token: session.tokens.accessToken.trim() });
+    } else {
+      if (session.tokens.accessToken?.trim()) out.push({ type: "access", token: session.tokens.accessToken.trim() });
+      if (session.tokens.idToken?.trim()) out.push({ type: "id", token: session.tokens.idToken.trim() });
+    }
+    return out.filter((entry, index, list) => list.findIndex((other) => other.token === entry.token) === index);
+  }
+
+  private async chooseGfnToken(session: AuthSession): Promise<string> {
+    const candidates = this.candidateGfnTokens(session);
+    if (candidates.length === 0) throw new Error("No authenticated session token available");
+    if (candidates.length === 1) {
+      this.preferredGfnToken = candidates[0].type;
+      return candidates[0].token;
+    }
+
+    const streamingBaseUrl = this.getProviderStreamingBaseUrl(session.provider.streamingServiceUrl);
+    for (const candidate of candidates) {
+      try {
+        await getVpcInfo(candidate.token, streamingBaseUrl);
+        if (this.preferredGfnToken !== candidate.type) {
+          this.preferredGfnToken = candidate.type;
+          await this.persist();
+        }
+        return candidate.token;
+      } catch {}
+    }
+
+    return candidates[0].token;
+  }
 
   private async ensureClientToken(tokens: AuthTokens, userId: string): Promise<AuthTokens> {
     const hasUsable = Boolean(tokens.clientToken) && !isNearExpiry(tokens.clientTokenExpiresAt, CLIENT_TOKEN_REFRESH_WINDOW_MS);
@@ -200,11 +243,16 @@ class AndroidAuthService {
     let tokens = initialTokens;
     try { tokens = await this.ensureClientToken(tokens, user.userId); } catch {}
     this.session = { provider: this.selectedProvider, tokens, user };
+    await this.chooseGfnToken(this.session);
+    try {
+      const subscription = await fetchSubscriptionInfo({ userId: user.userId, providerStreamingBaseUrl: this.selectedProvider.streamingServiceUrl });
+      this.session = { ...this.session, user: { ...this.session.user, membershipTier: subscription.membershipTier ?? this.session.user.membershipTier } };
+    } catch {}
     await this.persist();
     return this.session;
   }
 
-  async logout(): Promise<void> { this.session = null; await this.persist(); }
+  async logout(): Promise<void> { this.session = null; this.preferredGfnToken = "id"; await this.persist(); }
 
   async ensureValidSessionWithStatus(forceRefresh = false): Promise<AuthSessionResult> {
     if (!this.session) return { session: null, refresh: { attempted: false, forced: forceRefresh, outcome: "not_attempted", message: "No saved session found." } };
@@ -263,7 +311,7 @@ class AndroidAuthService {
     if (this.session) {
       const result = await this.ensureValidSessionWithStatus(false);
       if (!result.session) throw new Error("No authenticated session available");
-      return result.session.tokens.idToken ?? result.session.tokens.accessToken;
+      return this.chooseGfnToken(result.session);
     }
     if (explicitToken?.trim()) return explicitToken.trim();
     throw new Error("No authenticated session available");
@@ -277,7 +325,7 @@ async function getStoredSettings(): Promise<Settings> { return { ...DEFAULT_SETT
 async function saveSettings(settings: Settings): Promise<void> { await writePreferenceJson(SETTINGS_KEY, settings); }
 
 async function getVpcInfo(token: string | undefined, streamingBaseUrl: string): Promise<{ regions: StreamRegion[]; vpcId: string | null }> { const headers: Record<string, string> = { Accept: "application/json", "nv-client-id": LCARS_CLIENT_ID, "nv-client-type": "BROWSER", "nv-client-version": GFN_CLIENT_VERSION, "nv-client-streamer": "WEBRTC", "nv-device-os": "ANDROID", "nv-device-type": "PHONE", "User-Agent": GFN_USER_AGENT }; if (token) headers.Authorization = `GFNJWT ${token}`; const payload = await httpRequest<ServerInfoResponse>(`${normalizeBaseUrl(streamingBaseUrl)}v2/serverInfo`, { headers }); const regions = (payload.metaData ?? []).filter((entry) => entry.value.startsWith("https://") && entry.key !== "gfn-regions" && !entry.key.startsWith("gfn-")).map<StreamRegion>((entry) => ({ name: entry.key, url: normalizeBaseUrl(entry.value) })).sort((a, b) => a.name.localeCompare(b.name)); return { regions, vpcId: payload.requestStatus?.serverId ?? null }; }
-async function getVpcId(token: string, providerStreamingBaseUrl?: string): Promise<string> { try { return (await getVpcInfo(token, providerStreamingBaseUrl ?? DEFAULT_PROVIDER_STREAMING_URL)).vpcId ?? "GFN-PC"; } catch { return "GFN-PC"; } }
+async function getVpcId(token: string, providerStreamingBaseUrl?: string): Promise<string> { try { return (await getVpcInfo(token, providerStreamingBaseUrl ?? authStore.getSession()?.provider.streamingServiceUrl ?? authStore.getSelectedProvider().streamingServiceUrl ?? DEFAULT_PROVIDER_STREAMING_URL)).vpcId ?? "GFN-PC"; } catch { return "GFN-PC"; } }
 async function fetchPanels(token: string, panelNames: string[], vpcId: string): Promise<GraphQlResponse> { const params = new URLSearchParams({ requestType: panelNames.includes("LIBRARY") ? "panels/Library" : "panels/MainV2", extensions: JSON.stringify({ persistedQuery: { sha256Hash: PANELS_QUERY_HASH } }), huId: randomHuId(), variables: JSON.stringify({ vpcId, locale: DEFAULT_LOCALE, panelNames }) }); return httpRequest<GraphQlResponse>(`${GFN_GRAPHQL_URL}?${params.toString()}`, { headers: { Accept: "application/json, text/plain, */*", "Content-Type": "application/graphql", Origin: "https://play.geforcenow.com", Referer: "https://play.geforcenow.com/", Authorization: `GFNJWT ${token}`, "nv-client-id": LCARS_CLIENT_ID, "nv-client-type": "NATIVE", "nv-client-version": GFN_CLIENT_VERSION, "nv-client-streamer": "NVIDIA-CLASSIC", "nv-device-os": "ANDROID", "nv-device-type": "PHONE", "nv-browser-type": "CHROME", "User-Agent": GFN_USER_AGENT } }); }
 function flattenPanels(payload: GraphQlResponse): GameInfo[] { if (payload.errors?.length) throw new Error(payload.errors.map((error) => error.message).join(", ")); const games: GameInfo[] = []; for (const panel of payload.data?.panels ?? []) { for (const section of panel.sections ?? []) { for (const item of section.items ?? []) { if (item.__typename === "GameItem" && item.app) games.push(appToGame(item.app)); } } } return games; }
 async function fetchAppMetaData(token: string, appIds: string[], vpcId: string): Promise<GraphQlResponse> { const params = new URLSearchParams({ requestType: "appMetaData", extensions: JSON.stringify({ persistedQuery: { sha256Hash: APP_METADATA_QUERY_HASH } }), huId: randomHuId(), variables: JSON.stringify({ vpcId, locale: DEFAULT_LOCALE, appIds: [...new Set(appIds)] }) }); return httpRequest<GraphQlResponse>(`${GFN_GRAPHQL_URL}?${params.toString()}`, { headers: { Accept: "application/json, text/plain, */*", "Content-Type": "application/graphql", Origin: "https://play.geforcenow.com", Referer: "https://play.geforcenow.com/", Authorization: `GFNJWT ${token}`, "nv-client-id": LCARS_CLIENT_ID, "nv-client-type": "NATIVE", "nv-client-version": GFN_CLIENT_VERSION, "nv-client-streamer": "NVIDIA-CLASSIC", "nv-device-os": "ANDROID", "nv-device-type": "PHONE", "nv-browser-type": "CHROME", "User-Agent": GFN_USER_AGENT } }); }
@@ -320,7 +368,7 @@ async function stopSessionRequest(input: SessionStopRequest): Promise<void> { co
 async function reportSessionAdRequest(input: SessionAdReportRequest): Promise<SessionInfo> { const token = await authStore.resolveJwtToken(input.token); const clientId = input.clientId ?? crypto.randomUUID(); const deviceId = input.deviceId ?? (await Device.getId()).identifier ?? crypto.randomUUID(); const base = input.serverIp ? `https://${input.serverIp}` : resolveStreamingBaseUrl(input.zone, input.streamingBaseUrl); const response = await httpRequest<CloudMatchResponse>(`${base}/v2/session/${input.sessionId}/ad`, { method: "PUT", headers: requestHeaders({ token, clientId, deviceId }), data: { adId: input.adId, action: ({ start: 1, pause: 2, resume: 3, finish: 4, cancel: 5 } as const)[input.action], clientTimestamp: input.clientTimestamp, watchedTimeInMs: input.watchedTimeInMs, pausedTimeInMs: input.pausedTimeInMs, cancelReason: input.cancelReason, errorInfo: input.errorInfo } }); return toSessionInfo(input.zone, base, response, clientId, deviceId); }
 async function getActiveSessionsRequest(token: string, streamingBaseUrl?: string): Promise<ActiveSessionInfo[]> { const base = resolveStreamingBaseUrl("", streamingBaseUrl || authStore.getSelectedProvider().streamingServiceUrl); const response = await httpRequest<CloudMatchResponse>(`${base}/v2/sessions`, { headers: { Authorization: `GFNJWT ${token}`, Accept: "application/json, text/plain, */*", "User-Agent": GFN_USER_AGENT, "nv-client-id": LCARS_CLIENT_ID, "nv-client-streamer": "NVIDIA-CLASSIC", "nv-client-type": "NATIVE", "nv-client-version": GFN_CLIENT_VERSION, "nv-device-os": "ANDROID", "nv-device-type": "PHONE" } }); return (response.sessions ?? []).filter((session) => session.status === 2 || session.status === 3).map((session) => ({ sessionId: session.sessionId, appId: session.appId, gpuType: session.gpuType, status: session.status, serverIp: Array.isArray(session.sessionControlInfo?.ip) ? session.sessionControlInfo?.ip[0] : session.sessionControlInfo?.ip, signalingUrl: session.connectionInfo?.find((entry) => entry.usage === 14)?.resourcePath, resolution: session.resolution, fps: session.fps })); }
 async function claimSessionRequest(input: SessionClaimRequest): Promise<SessionInfo> { const token = await authStore.resolveJwtToken(input.token); const clientId = crypto.randomUUID(); const deviceId = (await Device.getId()).identifier || crypto.randomUUID(); const base = `https://${input.serverIp}`; const claimUrl = `${base}/v2/session/${input.sessionId}?${new URLSearchParams({ keyboardLayout: resolveGfnKeyboardLayout(input.settings?.keyboardLayout ?? DEFAULT_KEYBOARD_LAYOUT, "linux"), languageCode: input.settings?.gameLanguage ?? "en_US" }).toString()}`; await httpRequest<unknown>(claimUrl, { method: "PUT", headers: requestHeaders({ token, clientId, deviceId }), data: { sessionRequestData: { appId: input.appId ?? "0", requestedStreamingFeatures: { reflex: (input.settings?.fps ?? 60) >= 120, bitDepth: colorQualityBitDepth(input.settings?.colorQuality ?? "8bit_420"), enabledL4S: input.settings?.enableL4S ?? false, chromaFormat: colorQualityChromaFormat(input.settings?.colorQuality ?? "8bit_420") } } } }).catch(() => undefined); for (let attempt = 0; attempt < 60; attempt += 1) { if (attempt > 0) await new Promise((resolve) => window.setTimeout(resolve, 1000)); try { const polled = await httpRequest<CloudMatchResponse>(`${base}/v2/session/${input.sessionId}`, { headers: requestHeaders({ token, clientId, deviceId, includeOrigin: false }) }); if (polled.session.status === 2 || polled.session.status === 3) return toSessionInfo("", base, polled, clientId, deviceId); } catch {} } throw new Error("Session did not become ready after claiming"); }
-async function fetchSubscriptionInfo(input: SubscriptionFetchRequest): Promise<SubscriptionInfo> { const token = await authStore.resolveJwtToken(input.token); const vpcId = await getVpcId(token, input.providerStreamingBaseUrl); const url = new URL(MES_URL); url.searchParams.append("serviceName", "gfn_pc"); url.searchParams.append("languageCode", "en_US"); url.searchParams.append("vpcId", vpcId); url.searchParams.append("userId", input.userId); const data = await httpRequest<SubscriptionResponse>(url.toString(), { headers: { Authorization: `GFNJWT ${token}`, Accept: "application/json", "nv-client-id": LCARS_CLIENT_ID, "nv-client-type": "NATIVE", "nv-client-version": GFN_CLIENT_VERSION, "nv-client-streamer": "NVIDIA-CLASSIC", "nv-device-os": "ANDROID", "nv-device-type": "PHONE" } }); const allottedMinutes = data.allottedTimeInMinutes ?? 0; const purchasedMinutes = data.purchasedTimeInMinutes ?? 0; const rolledOverMinutes = data.rolledOverTimeInMinutes ?? 0; const totalMinutes = data.totalTimeInMinutes ?? allottedMinutes + purchasedMinutes + rolledOverMinutes; const remainingMinutes = data.remainingTimeInMinutes ?? 0; const usedMinutes = Math.max(totalMinutes - remainingMinutes, 0); const storageAddon = data.addons?.find((addon) => addon.type === "STORAGE" && addon.subType === "PERMANENT_STORAGE" && addon.status === "OK"); const attr = (key: string) => storageAddon?.attributes?.find((entry) => entry.key === key)?.textValue; return { membershipTier: data.membershipTier ?? "FREE", subscriptionType: data.type, subscriptionSubType: data.subType, allottedHours: allottedMinutes / 60, purchasedHours: purchasedMinutes / 60, rolledOverHours: rolledOverMinutes / 60, usedHours: usedMinutes / 60, remainingHours: remainingMinutes / 60, totalHours: totalMinutes / 60, firstEntitlementStartDateTime: data.firstEntitlementStartDateTime, serverRegionId: vpcId, currentSpanStartDateTime: data.currentSpanStartDateTime, currentSpanEndDateTime: data.currentSpanEndDateTime, notifyUserWhenTimeRemainingInMinutes: data.notifications?.notifyUserWhenTimeRemainingInMinutes, notifyUserOnSessionWhenRemainingTimeInMinutes: data.notifications?.notifyUserOnSessionWhenRemainingTimeInMinutes, state: data.currentSubscriptionState?.state, isGamePlayAllowed: data.currentSubscriptionState?.isGamePlayAllowed, isUnlimited: data.subType === "UNLIMITED", storageAddon: storageAddon ? { type: "PERMANENT_STORAGE", sizeGb: attr("TOTAL_STORAGE_SIZE_IN_GB") ? Number(attr("TOTAL_STORAGE_SIZE_IN_GB")) : undefined, usedGb: attr("USED_STORAGE_SIZE_IN_GB") ? Number(attr("USED_STORAGE_SIZE_IN_GB")) : undefined, regionName: attr("STORAGE_METRO_REGION_NAME"), regionCode: attr("STORAGE_METRO_REGION") } : undefined, entitledResolutions: (data.features?.resolutions ?? []).map((res) => ({ width: res.widthInPixels, height: res.heightInPixels, fps: res.framesPerSecond })) }; }
+async function fetchSubscriptionInfo(input: SubscriptionFetchRequest): Promise<SubscriptionInfo> { const token = await authStore.resolveJwtToken(input.token); const vpcId = await getVpcId(token, input.providerStreamingBaseUrl); const userId = input.userId || authStore.getSession()?.user.userId; if (!userId) throw new Error("No authenticated user available for subscription lookup"); const url = new URL(MES_URL); url.searchParams.append("serviceName", "gfn_pc"); url.searchParams.append("languageCode", "en_US"); url.searchParams.append("vpcId", vpcId); url.searchParams.append("userId", userId); const data = await httpRequest<SubscriptionResponse>(url.toString(), { headers: { Authorization: `GFNJWT ${token}`, Accept: "application/json", "nv-client-id": LCARS_CLIENT_ID, "nv-client-type": "NATIVE", "nv-client-version": GFN_CLIENT_VERSION, "nv-client-streamer": "NVIDIA-CLASSIC", "nv-device-os": "ANDROID", "nv-device-type": "PHONE" } }); const allottedMinutes = data.allottedTimeInMinutes ?? 0; const purchasedMinutes = data.purchasedTimeInMinutes ?? 0; const rolledOverMinutes = data.rolledOverTimeInMinutes ?? 0; const totalMinutes = data.totalTimeInMinutes ?? allottedMinutes + purchasedMinutes + rolledOverMinutes; const remainingMinutes = data.remainingTimeInMinutes ?? 0; const usedMinutes = Math.max(totalMinutes - remainingMinutes, 0); const storageAddon = data.addons?.find((addon) => addon.type === "STORAGE" && addon.subType === "PERMANENT_STORAGE" && addon.status === "OK"); const attr = (key: string) => storageAddon?.attributes?.find((entry) => entry.key === key)?.textValue; return { membershipTier: data.membershipTier ?? "FREE", subscriptionType: data.type, subscriptionSubType: data.subType, allottedHours: allottedMinutes / 60, purchasedHours: purchasedMinutes / 60, rolledOverHours: rolledOverMinutes / 60, usedHours: usedMinutes / 60, remainingHours: remainingMinutes / 60, totalHours: totalMinutes / 60, firstEntitlementStartDateTime: data.firstEntitlementStartDateTime, serverRegionId: vpcId, currentSpanStartDateTime: data.currentSpanStartDateTime, currentSpanEndDateTime: data.currentSpanEndDateTime, notifyUserWhenTimeRemainingInMinutes: data.notifications?.notifyUserWhenTimeRemainingInMinutes, notifyUserOnSessionWhenRemainingTimeInMinutes: data.notifications?.notifyUserOnSessionWhenRemainingTimeInMinutes, state: data.currentSubscriptionState?.state, isGamePlayAllowed: data.currentSubscriptionState?.isGamePlayAllowed, isUnlimited: data.subType === "UNLIMITED", storageAddon: storageAddon ? { type: "PERMANENT_STORAGE", sizeGb: attr("TOTAL_STORAGE_SIZE_IN_GB") ? Number(attr("TOTAL_STORAGE_SIZE_IN_GB")) : undefined, usedGb: attr("USED_STORAGE_SIZE_IN_GB") ? Number(attr("USED_STORAGE_SIZE_IN_GB")) : undefined, regionName: attr("STORAGE_METRO_REGION_NAME"), regionCode: attr("STORAGE_METRO_REGION") } : undefined, entitledResolutions: (data.features?.resolutions ?? []).map((res) => ({ width: res.widthInPixels, height: res.heightInPixels, fps: res.framesPerSecond })) }; }
 function unsupported(message: string): Promise<never> { return Promise.reject(new Error(message)); }
 function dataUrlExtension(dataUrl: string): string { if (dataUrl.startsWith("data:image/jpeg")) return "jpg"; if (dataUrl.startsWith("data:image/webp")) return "webp"; return "png"; }
 function decodeDataUrl(dataUrl: string): string { const match = /^data:[^;]+;base64,(.+)$/i.exec(dataUrl); if (!match || !match[1]) throw new Error("Invalid data URL"); return match[1]; }
@@ -343,7 +391,7 @@ const recordingMime = new Map<string, string>();
 const api: OpenNowApi = {
   getAuthSession: async (input: AuthSessionRequest = {}) => { await ensureInitialized(); return authStore.ensureValidSessionWithStatus(Boolean(input.forceRefresh)); },
   getLoginProviders: async () => { await ensureInitialized(); return authStore.getProviders(); },
-  getRegions: async (input: RegionsFetchRequest = {}) => { await ensureInitialized(); try { const token = input.token || authStore.getSession()?.tokens.idToken || authStore.getSession()?.tokens.accessToken; return (await getVpcInfo(token, authStore.getSelectedProvider().streamingServiceUrl)).regions; } catch { return []; } },
+  getRegions: async (input: RegionsFetchRequest = {}) => { await ensureInitialized(); try { const token = await authStore.resolveJwtToken(input.token); return (await getVpcInfo(token, authStore.getSession()?.provider.streamingServiceUrl ?? authStore.getSelectedProvider().streamingServiceUrl)).regions; } catch { return []; } },
   login: async (input: AuthLoginRequest) => { await ensureInitialized(); return authStore.login(input); },
   logout: async () => { await ensureInitialized(); await authStore.logout(); },
   fetchSubscription: async (input) => fetchSubscriptionInfo(input),
