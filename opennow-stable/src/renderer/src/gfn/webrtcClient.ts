@@ -2541,24 +2541,6 @@ export class GfnWebRtcClient {
       this.pendingMouseTimestampUs = timestampUs(eventTimestampMs);
     };
 
-    // Accumulate a mirror-mode delta directly (bypasses the delta filter which is
-    // calibrated for raw pointer-lock movementX/Y, not absolute-derived deltas).
-    const accumulateMirrorDelta = (dx: number, dy: number, eventTimestampMs: number): void => {
-      if (!this.inputReady || dx === 0 && dy === 0) return;
-      let adx = dx * this.mouseSensitivity;
-      let ady = dy * this.mouseSensitivity;
-      if (this.mouseAccelerationPercent > 1) {
-        const speed = Math.hypot(adx, ady);
-        const strength = (this.mouseAccelerationPercent - 1) / 149;
-        const accelFactor = 1 + Math.min(0.6 * strength, (speed / 50) * strength);
-        adx *= accelFactor;
-        ady *= accelFactor;
-      }
-      this.pendingMouseDx += Math.round(adx);
-      this.pendingMouseDy += Math.round(ady);
-      this.pendingMouseTimestampUs = timestampUs(eventTimestampMs);
-    };
-
     const onPointerMove = (event: PointerEvent) => {
       try {
         if (document?.body?.dataset?.sidebarOpen === "1") return;
@@ -2579,14 +2561,11 @@ export class GfnWebRtcClient {
         }
         queueMouseMovement(event.movementX, event.movementY, event.timeStamp);
       } else if (mouseInStreamView) {
-        // Mirror mode: derive deltas from absolute cursor position within the stream view.
-        tryAutoLock();
+        // Pointer lock disabled: keep local cursor tracking up to date without
+        // forwarding mouse movement into the stream.
         const rect = pointerLockTarget.getBoundingClientRect();
         const absX = event.clientX - rect.left;
         const absY = event.clientY - rect.top;
-        if (lastAbsX !== null && lastAbsY !== null) {
-          accumulateMirrorDelta(absX - lastAbsX, absY - lastAbsY, event.timeStamp);
-        }
         lastAbsX = absX;
         lastAbsY = absY;
       }
@@ -2600,13 +2579,11 @@ export class GfnWebRtcClient {
       if (isPointerLockActive()) {
         queueMouseMovement(event.movementX, event.movementY, event.timeStamp);
       } else if (mouseInStreamView) {
-        tryAutoLock();
+        // Pointer lock disabled: keep local cursor tracking up to date without
+        // forwarding mouse movement into the stream.
         const rect = pointerLockTarget.getBoundingClientRect();
         const absX = event.clientX - rect.left;
         const absY = event.clientY - rect.top;
-        if (lastAbsX !== null && lastAbsY !== null) {
-          accumulateMirrorDelta(absX - lastAbsX, absY - lastAbsY, event.timeStamp);
-        }
         lastAbsX = absX;
         lastAbsY = absY;
       }
@@ -2717,9 +2694,7 @@ export class GfnWebRtcClient {
       if (!this.inputReady) {
         return;
       }
-      // When pointer lock is not active, only forward events that originate from
-      // the video element itself to avoid intercepting overlay button clicks.
-      if (!isPointerLockActive() && event.target !== videoElement) {
+      if (!isPointerLockActive()) {
         return;
       }
       event.preventDefault();
@@ -2736,9 +2711,7 @@ export class GfnWebRtcClient {
       if (!this.inputReady) {
         return;
       }
-      // When pointer lock is not active, only forward events that originate from
-      // the video element itself to avoid intercepting overlay button clicks.
-      if (!isPointerLockActive() && event.target !== videoElement) {
+      if (!isPointerLockActive()) {
         return;
       }
       event.preventDefault();
@@ -2751,7 +2724,11 @@ export class GfnWebRtcClient {
     };
 
     const onWheel = (event: WheelEvent) => {
+      if (this.inputPaused) return;
       if (!this.inputReady) {
+        return;
+      }
+      if (!isPointerLockActive()) {
         return;
       }
       event.preventDefault();
