@@ -2581,7 +2581,7 @@ export function SettingsPage({ settings, updaterState, regions, onSettingChange,
               </div>
               <div className="settings-rows">
                 <div className="settings-row settings-row--top-aligned">
-                  <label className="settings-label">
+                  <label className="settings-label settings-label--wrap">
                     Check for Updates
                     <span className="settings-hint">Checks GitHub Releases for production updates and prefers immutable versioned release-notes assets when available.</span>
                   </label>

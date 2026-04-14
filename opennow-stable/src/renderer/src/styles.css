@@ -7432,6 +7432,13 @@ button.game-card-store-chip.active:hover {
   flex-wrap: wrap;
   gap: 10px;
   justify-content: flex-end;
+  flex: 0 1 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.settings-update-actions > button {
+  max-width: 100%;
 }
 
 .settings-update-progress-bar {
@@ -7466,7 +7473,7 @@ button.game-card-store-chip.active:hover {
 @media (max-width: 900px) {
   .settings-update-actions {
     width: 100%;
-    justify-content: stretch;
+    justify-content: flex-start;
   }
 
   .settings-update-actions > button {
