@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "discord-rpc": "^4.0.1",
+    "electron-updater": "^6.8.3",
     "lucide-react": "^1.7.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
@@ -97,6 +98,7 @@
       "category": "Game",
       "maintainer": "zortos293 <zortos293@users.noreply.github.com>",
       "artifactName": "OpenNOW-v${version}-linux-${arch}.${ext}"
-    }
+    },
+    "electronUpdaterCompatibility": ">=2.16"
   }
 }

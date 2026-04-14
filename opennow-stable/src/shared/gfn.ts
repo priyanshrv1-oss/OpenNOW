@@ -173,6 +173,46 @@ export interface Settings {
   enableCloudGsync: boolean;
   /** Show the currently streaming game as Discord Rich Presence activity */
   discordRichPresence: boolean;
+  /** Automatically check for application updates after startup */
+  autoCheckForUpdates: boolean;
+  /** Update version dismissed by the user */
+  skippedUpdateVersion: string;
+}
+
+export type UpdaterStatus = "idle" | "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error";
+export type UpdaterReleaseNotesSource = "artifact" | "feed" | "none";
+
+export interface UpdaterDownloadProgress {
+  percent: number;
+  transferred: number;
+  total: number;
+  bytesPerSecond: number;
+}
+
+export interface UpdaterState {
+  currentVersion: string;
+  status: UpdaterStatus;
+  availableVersion: string | null;
+  releaseName: string | null;
+  releaseDate: string | null;
+  releaseNotes: string | null;
+  releaseNotesSource: UpdaterReleaseNotesSource;
+  releaseTag: string | null;
+  downloadProgress: UpdaterDownloadProgress | null;
+  lastCheckedAt: string | null;
+  lastError: string | null;
+  downloaded: boolean;
+  canInstall: boolean;
+  skippedVersion: string | null;
+  isSkipped: boolean;
+}
+
+export interface ReleaseNotesArtifact {
+  version: string;
+  releaseName?: string;
+  releaseDate?: string;
+  notes: string;
+  tag: string;
 }
 
 export const DEFAULT_STREAM_PREFERENCES: Readonly<Pick<Settings, "codec" | "colorQuality">> = Object.freeze({
@@ -693,6 +733,13 @@ export interface OpenNowApi {
   getSettings(): Promise<Settings>;
   setSetting<K extends keyof Settings>(key: K, value: Settings[K]): Promise<void>;
   resetSettings(): Promise<Settings>;
+  getUpdaterState(): Promise<UpdaterState>;
+  checkForUpdates(): Promise<UpdaterState>;
+  downloadUpdate(): Promise<UpdaterState>;
+  installUpdate(): Promise<void>;
+  skipUpdate(version: string): Promise<UpdaterState>;
+  clearSkippedUpdate(): Promise<UpdaterState>;
+  onUpdaterStateChanged(listener: (state: UpdaterState) => void): () => void;
   getMicrophonePermission(): Promise<MicrophonePermissionResult>;
   /** Export logs in redacted format */
   exportLogs(format?: "text" | "json"): Promise<string>;

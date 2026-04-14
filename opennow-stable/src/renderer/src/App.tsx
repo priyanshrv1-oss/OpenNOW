@@ -18,10 +18,11 @@ import type {
   SessionInfo,
   Settings,
   SubscriptionInfo,
-  StreamRegion,
-  VideoCodec,
-  PrintedWasteQueueData,
-  PrintedWasteServerMapping,
+    StreamRegion,
+    VideoCodec,
+    PrintedWasteQueueData,
+    PrintedWasteServerMapping,
+    UpdaterState,
 } from "@shared/gfn";
 import {
   DEFAULT_KEYBOARD_LAYOUT,
@@ -65,6 +66,23 @@ const DEFAULT_STREAM_PREFERENCES = getDefaultStreamPreferences();
 const allResolutionOptions = ["1280x720", "1280x800", "1440x900", "1680x1050", "1920x1080", "1920x1200", "2560x1080", "2560x1440", "2560x1600", "3440x1440", "3840x2160", "3840x2400"];
 const fpsOptions = [30, 60, 120, 144, 240];
 const aspectRatioOptions = ["16:9", "16:10", "21:9", "32:9"] as const;
+const DEFAULT_UPDATER_STATE: UpdaterState = {
+  currentVersion: "",
+  status: "idle",
+  availableVersion: null,
+  releaseName: null,
+  releaseDate: null,
+  releaseNotes: null,
+  releaseNotesSource: "none",
+  releaseTag: null,
+  downloadProgress: null,
+  lastCheckedAt: null,
+  lastError: null,
+  downloaded: false,
+  canInstall: false,
+  skippedVersion: null,
+  isSkipped: false,
+};
 
 const RESOLUTION_TO_ASPECT_RATIO: Record<string, string> = {
   "1280x720": "16:9",
@@ -845,8 +863,11 @@ export function App(): JSX.Element {
     enableL4S: false,
     enableCloudGsync: false,
     discordRichPresence: false,
+    autoCheckForUpdates: true,
+    skippedUpdateVersion: "",
   });
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [updaterState, setUpdaterState] = useState<UpdaterState>(DEFAULT_UPDATER_STATE);
   const [codecResults, setCodecResults] = useState<CodecTestResult[] | null>(() => loadStoredCodecResults());
   const [codecTesting, setCodecTesting] = useState(false);
   const [regions, setRegions] = useState<StreamRegion[]>([]);
@@ -1736,6 +1757,18 @@ export function App(): JSX.Element {
     return () => window.clearInterval(timer);
   }, [authSession, refreshNavbarActiveSession, streamStatus]);
 
+  useEffect(() => {
+    const unsubscribe = window.openNow.onUpdaterStateChanged((nextState) => {
+      setUpdaterState(nextState);
+    });
+
+    void window.openNow.getUpdaterState().then(setUpdaterState).catch((error) => {
+      console.warn("Failed to load updater state:", error);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
   // Initialize app
   useEffect(() => {
     if (hasInitializedRef.current) return;
@@ -1744,8 +1777,12 @@ export function App(): JSX.Element {
     const initialize = async () => {
       try {
         // Load settings first
-        const loadedSettings = await window.openNow.getSettings();
+        const [loadedSettings, initialUpdaterState] = await Promise.all([
+          window.openNow.getSettings(),
+          window.openNow.getUpdaterState(),
+        ]);
         setSettings(loadedSettings);
+        setUpdaterState(initialUpdaterState);
         setShowStatsOverlay(loadedSettings.showStatsOnLaunch);
         setSettingsLoaded(true);
 
@@ -3635,6 +3672,7 @@ export function App(): JSX.Element {
         {currentPage === "settings" && (
           <SettingsPage
             settings={settings}
+            updaterState={updaterState}
             regions={regions}
             codecResults={codecResults}
             codecTesting={codecTesting}

@@ -1,4 +1,4 @@
-import { Globe, Check, Search, X, Loader, Zap, Mic, FileDown, Wifi, Trash2, Heart, Users, ExternalLink, Monitor, Keyboard } from "lucide-react";
+import { Globe, Check, Search, X, Loader, Zap, Mic, FileDown, Wifi, Trash2, Heart, Users, ExternalLink, Monitor, Keyboard, Download, RefreshCw } from "lucide-react";
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import type { JSX } from "react";
 
@@ -16,6 +16,7 @@ import type {
   ThankYouDataResult,
   ThankYouContributor,
   ThankYouSupporter,
+  UpdaterState,
 } from "@shared/gfn";
 import {
   colorQualityRequiresHevc,
@@ -28,6 +29,7 @@ import { getCodecDecodeBadgeState, type CodecTestResult } from "../lib/codecDiag
 
 interface SettingsPageProps {
   settings: Settings;
+  updaterState: UpdaterState;
   regions: StreamRegion[];
   codecResults: CodecTestResult[] | null;
   codecTesting: boolean;
@@ -38,6 +40,33 @@ interface SettingsPageProps {
 type ThanksLoadState = "idle" | "loading" | "loaded" | "error";
 
 type SettingsSectionId = "stream" | "game" | "audio" | "input" | "interface" | "thanks";
+
+function formatRelativeTimestamp(value: string | null): string | null {
+  if (!value) return null;
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) return null;
+  const diffMinutes = Math.round((Date.now() - timestamp) / 60000);
+  if (diffMinutes < 1) return "just now";
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.round(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.round(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
+function formatBytesPerSecond(value: number | undefined): string | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  const units = ["B/s", "KB/s", "MB/s", "GB/s"];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${size.toFixed(size >= 100 ? 0 : size >= 10 ? 1 : 2)} ${units[unitIndex]}`;
+}
 
 const POSTER_SIZE_MIN = 75;
 const POSTER_SIZE_MAX = 135;
@@ -358,7 +387,7 @@ function saveCachedEntitledResolutions(cache: EntitledResolutionsCache): void {
 
 /* ── Component ────────────────────────────────────────────────────── */
 
-export function SettingsPage({ settings, regions, onSettingChange, codecResults, codecTesting, onRunCodecTest }: SettingsPageProps): JSX.Element {
+export function SettingsPage({ settings, updaterState, regions, onSettingChange, codecResults, codecTesting, onRunCodecTest }: SettingsPageProps): JSX.Element {
   const [savedIndicator, setSavedIndicator] = useState(false);
   const [activeSection, setActiveSection] = useState<SettingsSectionId>("stream");
   const [thanksData, setThanksData] = useState<ThankYouDataResult | null>(null);
@@ -557,6 +586,7 @@ export function SettingsPage({ settings, regions, onSettingChange, codecResults,
     [entitledResolutions, settings.resolution, hasDynamic]
   );
   const posterSizePercent = Math.round(settings.posterSizeScale * 100);
+  const [updateActionBusy, setUpdateActionBusy] = useState<"check" | "download" | "install" | "skip" | "clear-skip" | null>(null);
 
   const selectedResolutionLabel = useMemo(() => {
     if (hasDynamic) {
@@ -1196,6 +1226,26 @@ export function SettingsPage({ settings, regions, onSettingChange, codecResults,
   const showAudio = activeSection === "audio" || showAll;
   const showInput = activeSection === "input" || showAll;
   const showInterface = activeSection === "interface" || showAll;
+  const updateStatusLabel = useMemo(() => {
+    switch (updaterState.status) {
+      case "checking":
+        return "Checking for updates";
+      case "available":
+        return updaterState.isSkipped ? "Update available (dismissed)" : "Update available";
+      case "not-available":
+        return "You are up to date";
+      case "downloading":
+        return "Downloading update";
+      case "downloaded":
+        return "Update ready to install";
+      case "error":
+        return "Update check failed";
+      default:
+        return "Idle";
+    }
+  }, [updaterState]);
+  const downloadSpeedLabel = useMemo(() => formatBytesPerSecond(updaterState.downloadProgress?.bytesPerSecond), [updaterState.downloadProgress?.bytesPerSecond]);
+  const lastCheckedLabel = useMemo(() => formatRelativeTimestamp(updaterState.lastCheckedAt), [updaterState.lastCheckedAt]);
 
   return (
     <div className="settings-page">
@@ -2458,6 +2508,198 @@ export function SettingsPage({ settings, regions, onSettingChange, codecResults,
                 <h2>Miscellaneous</h2>
               </div>
               <div className="settings-rows">
+                <div className="settings-row settings-row--column settings-update-panel">
+                  <div className="settings-row settings-row--top-aligned settings-update-panel-header">
+                    <label className="settings-label">
+                      Application Updates
+                      <span className="settings-hint">Checks GitHub Releases for production updates and prefers immutable versioned release-notes assets when available.</span>
+                    </label>
+                    <div className="settings-update-actions">
+                      <button
+                        type="button"
+                        className="settings-export-logs-btn"
+                        disabled={updateActionBusy !== null || updaterState.status === "checking" || updaterState.status === "downloading"}
+                        onClick={async () => {
+                          setUpdateActionBusy("check");
+                          try {
+                            await window.openNow.checkForUpdates();
+                          } catch (err) {
+                            console.error("[Settings] Failed to check for updates:", err);
+                          } finally {
+                            setUpdateActionBusy(null);
+                          }
+                        }}
+                      >
+                        {updateActionBusy === "check" ? <Loader size={16} className="settings-loading-icon" /> : <RefreshCw size={16} />}
+                        Check Now
+                      </button>
+                      {updaterState.status === "available" && !updaterState.downloaded && !updaterState.isSkipped && (
+                        <button
+                          type="button"
+                          className="settings-export-logs-btn"
+                          disabled={updateActionBusy !== null}
+                          onClick={async () => {
+                            setUpdateActionBusy("download");
+                            try {
+                              await window.openNow.downloadUpdate();
+                            } catch (err) {
+                              console.error("[Settings] Failed to download update:", err);
+                            } finally {
+                              setUpdateActionBusy(null);
+                            }
+                          }}
+                        >
+                          {updateActionBusy === "download" ? <Loader size={16} className="settings-loading-icon" /> : <Download size={16} />}
+                          Download
+                        </button>
+                      )}
+                      {updaterState.canInstall && (
+                        <button
+                          type="button"
+                          className="settings-export-logs-btn"
+                          disabled={updateActionBusy !== null}
+                          onClick={async () => {
+                            if (!window.confirm("Install the downloaded update and restart OpenNOW now?")) {
+                              return;
+                            }
+                            setUpdateActionBusy("install");
+                            try {
+                              await window.openNow.installUpdate();
+                            } catch (err) {
+                              console.error("[Settings] Failed to install update:", err);
+                              setUpdateActionBusy(null);
+                            }
+                          }}
+                        >
+                          {updateActionBusy === "install" ? <Loader size={16} className="settings-loading-icon" /> : <RefreshCw size={16} />}
+                          Restart to Install
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="settings-update-summary-grid">
+                    <div className="settings-update-summary-card">
+                      <span className="settings-update-summary-label">Current version</span>
+                      <strong>{updaterState.currentVersion || "Unknown"}</strong>
+                    </div>
+                    <div className="settings-update-summary-card">
+                      <span className="settings-update-summary-label">Status</span>
+                      <strong>{updateStatusLabel}</strong>
+                      {lastCheckedLabel && <span className="settings-subtle-hint">Last checked {lastCheckedLabel}</span>}
+                    </div>
+                    <div className="settings-update-summary-card">
+                      <span className="settings-update-summary-label">Available version</span>
+                      <strong>{updaterState.availableVersion ?? "—"}</strong>
+                      {updaterState.releaseTag && <span className="settings-subtle-hint">Tag {updaterState.releaseTag}</span>}
+                    </div>
+                  </div>
+
+                  <div className="settings-row">
+                    <label className="settings-label">
+                      Check on Startup
+                      <span className="settings-hint">Run a quiet background update check shortly after launch.</span>
+                    </label>
+                    <label className="settings-toggle">
+                      <input
+                        type="checkbox"
+                        checked={settings.autoCheckForUpdates}
+                        onChange={(e) => handleChange("autoCheckForUpdates", e.target.checked)}
+                      />
+                      <span className="settings-toggle-track" />
+                    </label>
+                  </div>
+
+                  {updaterState.downloadProgress && updaterState.status === "downloading" && (
+                    <div className="settings-row settings-row--column">
+                      <div className="settings-row-top settings-row-top--compact">
+                        <label className="settings-label">Download Progress</label>
+                        <span className="settings-value-badge">{Math.round(updaterState.downloadProgress.percent)}%</span>
+                      </div>
+                      <div className="settings-update-progress-bar">
+                        <div className="settings-update-progress-bar-fill" style={{ width: `${Math.max(0, Math.min(100, updaterState.downloadProgress.percent))}%` }} />
+                      </div>
+                      <span className="settings-subtle-hint">
+                        {`${(updaterState.downloadProgress.transferred / (1024 * 1024)).toFixed(1)} MB / ${(updaterState.downloadProgress.total / (1024 * 1024)).toFixed(1)} MB`}
+                        {downloadSpeedLabel ? ` • ${downloadSpeedLabel}` : ""}
+                      </span>
+                    </div>
+                  )}
+
+                  {updaterState.availableVersion && !updaterState.canInstall && (
+                    <div className="settings-row settings-row--top-aligned">
+                      <label className="settings-label">
+                        Dismiss This Update
+                        <span className="settings-hint">Hide this specific version until a different release appears or you clear the dismissal.</span>
+                      </label>
+                      <div className="settings-update-actions">
+                        {!updaterState.isSkipped ? (
+                          <button
+                            type="button"
+                            className="settings-delete-cache-btn"
+                            disabled={updateActionBusy !== null}
+                            onClick={async () => {
+                              setUpdateActionBusy("skip");
+                              try {
+                                await window.openNow.skipUpdate(updaterState.availableVersion!);
+                              } catch (err) {
+                                console.error("[Settings] Failed to dismiss update:", err);
+                              } finally {
+                                setUpdateActionBusy(null);
+                              }
+                            }}
+                          >
+                            {updateActionBusy === "skip" ? <Loader size={16} className="settings-loading-icon" /> : <Trash2 size={16} />}
+                            Dismiss
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="settings-export-logs-btn"
+                            disabled={updateActionBusy !== null}
+                            onClick={async () => {
+                              setUpdateActionBusy("clear-skip");
+                              try {
+                                await window.openNow.clearSkippedUpdate();
+                              } catch (err) {
+                                console.error("[Settings] Failed to clear dismissed update:", err);
+                              } finally {
+                                setUpdateActionBusy(null);
+                              }
+                            }}
+                          >
+                            {updateActionBusy === "clear-skip" ? <Loader size={16} className="settings-loading-icon" /> : <RefreshCw size={16} />}
+                            Show Again
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {(updaterState.releaseName || updaterState.releaseDate || updaterState.releaseNotes) && (
+                    <div className="settings-row settings-row--column settings-update-notes-card">
+                      <div className="settings-row-top">
+                        <label className="settings-label">Release Notes</label>
+                        <span className="settings-value-badge">{updaterState.releaseNotesSource === "artifact" ? "Immutable Asset" : updaterState.releaseNotesSource === "feed" ? "Release Feed" : "Unavailable"}</span>
+                      </div>
+                      {(updaterState.releaseName || updaterState.releaseDate) && (
+                        <div className="settings-update-release-meta">
+                          {updaterState.releaseName && <strong>{updaterState.releaseName}</strong>}
+                          {updaterState.releaseDate && <span>{new Date(updaterState.releaseDate).toLocaleString()}</span>}
+                        </div>
+                      )}
+                      <pre className="settings-update-notes">{updaterState.releaseNotes ?? "No release notes were published for this release."}</pre>
+                    </div>
+                  )}
+
+                  {updaterState.lastError && (
+                    <div className="settings-update-error">
+                      <strong>Updater error</strong>
+                      <span>{updaterState.lastError}</span>
+                    </div>
+                  )}
+                </div>
+
                 <div className="settings-row">
                   <label className="settings-label">
                     Export Logs

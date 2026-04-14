@@ -67,6 +67,7 @@ import type {
 import { serializeSessionErrorTransport } from "@shared/sessionError";
 
 import { getSettingsManager, type SettingsManager } from "./settings";
+import { getUpdaterService } from "./updater";
 
 import { createSession, pollSession, reportSessionAd, stopSession, getActiveSessions, claimSession } from "./gfn/cloudmatch";
 import { AuthService } from "./gfn/auth";
@@ -223,6 +224,7 @@ let signalingClient: GfnSignalingClient | null = null;
 let signalingClientKey: string | null = null;
 let authService: AuthService;
 let settingsManager: SettingsManager;
+const updaterService = getUpdaterService();
 const SCREENSHOT_LIMIT = 60;
 
 function getScreenshotDirectory(): string {
@@ -544,6 +546,8 @@ async function createMainWindow(): Promise<void> {
     },
   });
 
+  updaterService.setMainWindow(mainWindow);
+
   if (process.platform === "win32") {
     // Keep native window fullscreen in sync with HTML fullscreen so Windows treats
     // stream playback like a real fullscreen window instead of only DOM fullscreen.
@@ -576,6 +580,7 @@ async function createMainWindow(): Promise<void> {
   }
 
   mainWindow.on("closed", () => {
+    updaterService.setMainWindow(null);
     mainWindow = null;
   });
 }
@@ -1225,6 +1230,30 @@ function registerIpcHandlers(): void {
     return settingsManager.reset();
   });
 
+  ipcMain.handle(IPC_CHANNELS.UPDATES_GET_STATE, async () => {
+    return updaterService.getState();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.UPDATES_CHECK, async () => {
+    return updaterService.checkForUpdates(true);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.UPDATES_DOWNLOAD, async () => {
+    return updaterService.downloadUpdate();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.UPDATES_INSTALL, async () => {
+    updaterService.quitAndInstall();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.UPDATES_SKIP, async (_event, version: string) => {
+    return updaterService.skipVersion(version);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.UPDATES_CLEAR_SKIPPED, async () => {
+    return updaterService.clearSkippedVersion();
+  });
+
   ipcMain.handle(IPC_CHANNELS.MICROPHONE_PERMISSION_GET, async (): Promise<MicrophonePermissionResult> => {
     if (process.platform !== "darwin") {
       return {
@@ -1766,6 +1795,7 @@ app.whenReady().then(async () => {
   await authService.initialize();
 
   settingsManager = getSettingsManager();
+  updaterService.initialize(settingsManager);
 
   // Connect Discord Rich Presence if the user has opted in
   if (settingsManager.get("discordRichPresence")) {
@@ -1835,6 +1865,7 @@ app.whenReady().then(async () => {
   refreshScheduler.start();
 
   await createMainWindow();
+  updaterService.scheduleStartupCheck();
 
   app.on("activate", async () => {
     if (BrowserWindow.getAllWindows().length === 0) {

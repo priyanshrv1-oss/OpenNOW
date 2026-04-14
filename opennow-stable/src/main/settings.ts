@@ -84,6 +84,10 @@ export interface Settings {
   enableCloudGsync: boolean;
   /** Show the currently streaming game as Discord Rich Presence activity */
   discordRichPresence: boolean;
+  /** Automatically check for application updates after startup */
+  autoCheckForUpdates: boolean;
+  /** Update version dismissed by the user */
+  skippedUpdateVersion: string;
 }
 
 const defaultStopShortcut = "Ctrl+Shift+Q";
@@ -134,6 +138,8 @@ const DEFAULT_SETTINGS: Settings = {
   enableL4S: false,
   enableCloudGsync: false,
   discordRichPresence: false,
+  autoCheckForUpdates: true,
+  skippedUpdateVersion: "",
 };
 
 export class SettingsManager {

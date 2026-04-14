@@ -181,6 +181,8 @@ jobs:
             opennow-stable/dist-release/*.zip
             opennow-stable/dist-release/*.AppImage
             opennow-stable/dist-release/*.deb
+            opennow-stable/dist-release/*.yml
+            opennow-stable/dist-release/*.blockmap
           if-no-files-found: error
 
   release:
@@ -199,6 +201,40 @@ jobs:
           path: release-artifacts
           merge-multiple: true
 
+      - name: Generate immutable release notes artifact
+        id: release_notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          mkdir -p release-artifacts
+          gh api repos/${{ github.repository }}/releases/generate-notes \
+            -X POST \
+            -f tag_name="$RELEASE_TAG" \
+            -f target_commitish="${{ github.sha }}" > release-notes-response.json
+
+          python3 - <<'PYTHON'
+          from datetime import datetime, timezone
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path('release-notes-response.json').read_text())
+          version = '${{ needs.preflight.outputs.version }}'
+          tag = '${{ needs.preflight.outputs.release_tag }}'
+          artifact = {
+              'version': version,
+              'releaseName': payload.get('name') or f'OpenNOW v{version}',
+              'releaseDate': datetime.now(timezone.utc).isoformat(),
+              'notes': payload.get('body', '').strip(),
+              'tag': tag,
+          }
+          out = Path('release-artifacts') / f'release-notes-v{version}.json'
+          out.write_text(json.dumps(artifact, indent=2) + '\n')
+          Path('release-notes.md').write_text((payload.get('body', '').strip() + '\n') if payload.get('body') else '')
+          PYTHON
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
@@ -206,7 +242,7 @@ jobs:
           name: OpenNOW v${{ needs.preflight.outputs.version }}
           prerelease: ${{ needs.preflight.outputs.prerelease }}
           make_latest: ${{ needs.preflight.outputs.make_latest }}
-          generate_release_notes: true
+          body_path: release-notes.md
           files: release-artifacts/**/*
 
   finalize:

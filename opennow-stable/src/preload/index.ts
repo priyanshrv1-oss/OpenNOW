@@ -36,6 +36,7 @@ import type {
   PrintedWasteQueueData,
   PrintedWasteServerMapping,
   ThankYouDataResult,
+  UpdaterState,
 } from "@shared/gfn";
 import { parseSerializedSessionErrorTransport } from "@shared/sessionError";
 
@@ -112,6 +113,21 @@ const api: OpenNowApi = {
   setSetting: <K extends keyof Settings>(key: K, value: Settings[K]) =>
     ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SET, key, value),
   resetSettings: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_RESET),
+  getUpdaterState: (): Promise<UpdaterState> => ipcRenderer.invoke(IPC_CHANNELS.UPDATES_GET_STATE),
+  checkForUpdates: (): Promise<UpdaterState> => ipcRenderer.invoke(IPC_CHANNELS.UPDATES_CHECK),
+  downloadUpdate: (): Promise<UpdaterState> => ipcRenderer.invoke(IPC_CHANNELS.UPDATES_DOWNLOAD),
+  installUpdate: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATES_INSTALL),
+  skipUpdate: (version: string): Promise<UpdaterState> => ipcRenderer.invoke(IPC_CHANNELS.UPDATES_SKIP, version),
+  clearSkippedUpdate: (): Promise<UpdaterState> => ipcRenderer.invoke(IPC_CHANNELS.UPDATES_CLEAR_SKIPPED),
+  onUpdaterStateChanged: (listener: (state: UpdaterState) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: UpdaterState) => {
+      listener(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.UPDATES_STATE_CHANGED, wrapped);
+    return () => {
+      ipcRenderer.off(IPC_CHANNELS.UPDATES_STATE_CHANGED, wrapped);
+    };
+  },
   getMicrophonePermission: () => ipcRenderer.invoke(IPC_CHANNELS.MICROPHONE_PERMISSION_GET),
   exportLogs: (format?: "text" | "json") => ipcRenderer.invoke(IPC_CHANNELS.LOGS_EXPORT, format),
   pingRegions: (regions: StreamRegion[]) => ipcRenderer.invoke(IPC_CHANNELS.PING_REGIONS, regions),
