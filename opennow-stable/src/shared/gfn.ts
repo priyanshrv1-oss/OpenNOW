@@ -128,6 +128,7 @@ export interface MicrophonePermissionResult {
 export interface Settings {
   resolution: string;
   aspectRatio: AspectRatio;
+  posterSizeScale: number;
   fps: number;
   maxBitrateMbps: number;
   codec: VideoCodec;
@@ -168,6 +169,8 @@ export interface Settings {
   gameLanguage: GameLanguage;
   /** Experimental request for Low Latency, Low Loss, Scalable throughput on new sessions */
   enableL4S: boolean;
+  /** Request Cloud G-Sync / Variable Refresh Rate on new sessions */
+  enableCloudGsync: boolean;
   /** Show the currently streaming game as Discord Rich Presence activity */
   discordRichPresence: boolean;
 }
@@ -322,6 +325,13 @@ export interface GamesFetchRequest {
   providerStreamingBaseUrl?: string;
 }
 
+export interface CatalogBrowseRequest extends GamesFetchRequest {
+  searchQuery?: string;
+  sortId?: string;
+  filterIds?: string[];
+  fetchCount?: number;
+}
+
 export interface ResolveLaunchIdRequest {
   token?: string;
   providerStreamingBaseUrl?: string;
@@ -338,9 +348,14 @@ export interface GameVariant {
   id: string;
   store: string;
   supportedControls: string[];
+  librarySelected?: boolean;
+  libraryStatus?: string;
+  lastPlayedDate?: string;
+  gfnStatus?: string;
 }
 
 export interface GameInfo {
+
   id: string;
   uuid?: string;
   launchAppId?: string;
@@ -353,8 +368,49 @@ export interface GameInfo {
   screenshotUrl?: string;
   playType?: string;
   membershipTierLabel?: string;
+  publisherName?: string;
+  contentRatings?: string[];
+  playabilityState?: string;
+  availableStores?: string[];
+  searchText?: string;
+  lastPlayed?: string;
+  isInLibrary?: boolean;
   selectedVariantIndex: number;
   variants: GameVariant[];
+}
+
+export interface CatalogFilterOption {
+  id: string;
+  rawId: string;
+  label: string;
+  groupId: string;
+  groupLabel: string;
+}
+
+export interface CatalogFilterGroup {
+  id: string;
+  label: string;
+  options: CatalogFilterOption[];
+}
+
+export interface CatalogSortOption {
+  id: string;
+  label: string;
+  orderBy: string;
+}
+
+export interface CatalogBrowseResult {
+  games: GameInfo[];
+  numberReturned: number;
+  numberSupported: number;
+  totalCount: number;
+  hasNextPage: boolean;
+  endCursor?: string;
+  searchQuery: string;
+  selectedSortId: string;
+  selectedFilterIds: string[];
+  filterGroups: CatalogFilterGroup[];
+  sortOptions: CatalogSortOption[];
 }
 
 export interface StreamSettings {
@@ -369,6 +425,8 @@ export interface StreamSettings {
   gameLanguage: GameLanguage;
   /** Experimental request for Low Latency, Low Loss, Scalable throughput on new sessions */
   enableL4S: boolean;
+  /** Request Cloud G-Sync / Variable Refresh Rate on new sessions */
+  enableCloudGsync: boolean;
 }
 
 export interface SessionCreateRequest {
@@ -607,6 +665,7 @@ export interface OpenNowApi {
   fetchSubscription(input: SubscriptionFetchRequest): Promise<SubscriptionInfo>;
   fetchMainGames(input: GamesFetchRequest): Promise<GameInfo[]>;
   fetchLibraryGames(input: GamesFetchRequest): Promise<GameInfo[]>;
+  browseCatalog(input: CatalogBrowseRequest): Promise<CatalogBrowseResult>;
   fetchPublicGames(): Promise<GameInfo[]>;
   resolveLaunchAppId(input: ResolveLaunchIdRequest): Promise<string | null>;
   createSession(input: SessionCreateRequest): Promise<SessionInfo>;
