@@ -7,6 +7,8 @@
     "build": "npm --prefix opennow-stable run build",
     "typecheck": "npm --prefix opennow-stable run typecheck",
     "dist": "npm --prefix opennow-stable run dist",
-    "dist:signed": "npm --prefix opennow-stable run dist:signed"
+    "dist:signed": "npm --prefix opennow-stable run dist:signed",
+    "dist:mac:catalina": "npm --prefix opennow-stable run dist:mac:catalina",
+    "dist:mac:catalina:signed": "npm --prefix opennow-stable run dist:mac:catalina:signed"
   }
 }

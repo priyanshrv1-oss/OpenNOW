@@ -101,19 +101,22 @@ jobs:
         include:
           - label: windows
             os: blacksmith-4vcpu-windows-2025
-            builder_args: "--win nsis portable"
+            package_script: package:ci -- --win nsis portable
           - label: macos-x64
             os: macos-latest
-            builder_args: "--mac dmg zip --x64"
+            package_script: package:ci -- --mac dmg zip --x64
           - label: macos-arm64
             os: macos-latest
-            builder_args: "--mac dmg zip --arm64"
+            package_script: package:ci -- --mac dmg zip --arm64
+          - label: macos-catalina-x64
+            os: macos-latest
+            package_script: package:mac:catalina:ci
           - label: linux-x64
             os: blacksmith-4vcpu-ubuntu-2404
-            builder_args: "--linux AppImage deb --x64"
+            package_script: package:ci -- --linux AppImage deb --x64
           - label: linux-arm64
             os: blacksmith-4vcpu-ubuntu-2404-arm
-            builder_args: "--linux AppImage deb --arm64"
+            package_script: package:ci -- --linux AppImage deb --arm64
 
     defaults:
       run:
@@ -169,7 +172,7 @@ jobs:
         run: npm run build
 
       - name: Package installers
-        run: npx electron-builder --publish never ${{ matrix.builder_args }}
+        run: npm run ${{ matrix.package_script }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

@@ -1,0 +1,6 @@
+{
+  "extends": "./electron-builder.base.json",
+  "mac": {
+    "artifactName": "OpenNOW-v${version}-mac-${arch}.${ext}"
+  }
+}

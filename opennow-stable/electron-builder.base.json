@@ -1,0 +1,52 @@
+{
+  "appId": "com.zortos.opennow.stable",
+  "productName": "OpenNOW",
+  "publish": [
+    {
+      "provider": "github",
+      "owner": "OpenCloudGaming",
+      "repo": "OpenNOW"
+    }
+  ],
+  "icon": "../logo.png",
+  "npmRebuild": false,
+  "nodeGypRebuild": false,
+  "buildDependenciesFromSource": false,
+  "directories": {
+    "output": "dist-release"
+  },
+  "files": [
+    "dist/**",
+    "dist-electron/**",
+    "package.json"
+  ],
+  "asar": true,
+  "win": {
+    "target": [
+      "nsis",
+      "portable"
+    ]
+  },
+  "nsis": {
+    "artifactName": "OpenNOW-v${version}-setup-${arch}.${ext}"
+  },
+  "portable": {
+    "artifactName": "OpenNOW-v${version}-portable-${arch}.${ext}"
+  },
+  "mac": {
+    "target": [
+      "dmg",
+      "zip"
+    ],
+    "category": "public.app-category.games"
+  },
+  "linux": {
+    "target": [
+      "AppImage",
+      "deb"
+    ],
+    "category": "Game",
+    "maintainer": "zortos293 <zortos293@users.noreply.github.com>",
+    "artifactName": "OpenNOW-v${version}-linux-${arch}.${ext}"
+  }
+}

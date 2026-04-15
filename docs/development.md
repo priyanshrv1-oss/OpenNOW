@@ -26,6 +26,7 @@ npm run dev
 npm run typecheck
 npm run build
 npm run dist
+npm run dist:mac:catalina
 ```
 
 Directly inside `opennow-stable/`:
@@ -37,6 +38,8 @@ npm run typecheck
 npm run build
 npm run dist
 npm run dist:signed
+npm run dist:mac:catalina
+npm run dist:mac:catalina:signed
 ```
 
 ## Workspace Layout
@@ -138,6 +141,20 @@ cd opennow-stable
 npm run dist:signed
 ```
 
+Catalina-compatible legacy macOS packages:
+
+```bash
+cd opennow-stable
+npm run dist:mac:catalina
+```
+
+Signed Catalina-compatible packages:
+
+```bash
+cd opennow-stable
+npm run dist:mac:catalina:signed
+```
+
 ## CI And Releases
 
 The repository includes two main GitHub Actions workflows:
@@ -147,18 +164,22 @@ The repository includes two main GitHub Actions workflows:
 
 Current build matrix:
 
-| Target | Output |
-| --- | --- |
-| Windows | NSIS installer, portable executable |
-| macOS x64 | `dmg`, `zip` |
-| macOS arm64 | `dmg`, `zip` |
-| Linux x64 | `AppImage`, `deb` |
-| Linux ARM64 | `AppImage`, `deb` |
+| Target | Packaging path | Output |
+| --- | --- | --- |
+| Windows | Main Electron line | NSIS installer, portable executable |
+| macOS x64 | Main Electron line | `OpenNOW-v${version}-mac-x64.{dmg,zip}` |
+| macOS arm64 | Main Electron line | `OpenNOW-v${version}-mac-arm64.{dmg,zip}` |
+| macOS Catalina x64 | Legacy Electron 27 packaging config with `minimumSystemVersion: 10.15.0` | `OpenNOW-v${version}-mac-catalina-x64.{dmg,zip}` |
+| Linux x64 | Main Electron line | `AppImage`, `deb` |
+| Linux ARM64 | Main Electron line | `AppImage`, `deb` |
+
+The Catalina lane reuses the same compiled application source and electron-vite build output. Only the packaging step switches to `electron-builder.catalina.json`, which pins `electronVersion` to `27.3.11` and sets the macOS minimum system version explicitly for Catalina-compatible distribution.
 
 ## Notes For Contributors
 
 - The active app is the Electron client. If you see older references to previous implementations, prefer `opennow-stable/`.
-- Root-level npm scripts are convenience wrappers around the `opennow-stable` workspace.
+- Root-level npm scripts are convenience wrappers around the `opennow-stable` workspace, including the Catalina-specific `dist:mac:catalina` packaging command.
+- `opennow-stable/electron-builder.json` is the default packaging config for current Electron builds; `opennow-stable/electron-builder.catalina.json` is the dedicated legacy macOS packaging config.
 - Before opening a PR, run `npm run typecheck` and `npm run build`.
 
 For contribution workflow details, see [`.github/CONTRIBUTING.md`](../.github/CONTRIBUTING.md).

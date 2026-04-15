@@ -1,0 +1,8 @@
+{
+  "extends": "./electron-builder.base.json",
+  "electronVersion": "27.3.11",
+  "mac": {
+    "minimumSystemVersion": "10.15.0",
+    "artifactName": "OpenNOW-v${version}-mac-catalina-x64.${ext}"
+  }
+}
