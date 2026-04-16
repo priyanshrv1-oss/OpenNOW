@@ -2580,71 +2580,6 @@ export function SettingsPage({ settings, regions, onSettingChange, codecResults,
               </div>
             </section>
 
-            {/* ── Miscellaneous ── */}
-            <section className="settings-section">
-              {showAll && <div className="settings-section-context">Interface</div>}
-              <div className="settings-section-header">
-                <h2>Miscellaneous</h2>
-              </div>
-              <div className="settings-rows">
-                <div className="settings-row">
-                  <label className="settings-label">
-                    Export Logs
-                    <span className="settings-hint">Download debug logs with sensitive data redacted for privacy</span>
-                  </label>
-                  <button
-                    type="button"
-                    className="settings-export-logs-btn"
-                    onClick={async () => {
-                      try {
-                        const logs = await window.openNow.exportLogs("text");
-                        const blob = new Blob([logs], { type: "text/plain" });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement("a");
-                        a.href = url;
-                        a.download = `opennow-logs-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
-                      } catch (err) {
-                        console.error("[Settings] Failed to export logs:", err);
-                        alert("Failed to export logs. Please try again.");
-                      }
-                    }}
-                  >
-                    <FileDown size={16} />
-                    Export Logs
-                  </button>
-                </div>
-
-                <div className="settings-row">
-                  <label className="settings-label">
-                    Delete Cache
-                    <span className="settings-hint">Clear all cached game data, images, and metadata</span>
-                  </label>
-                  <button
-                    type="button"
-                    className="settings-delete-cache-btn"
-                    onClick={async () => {
-                      if (!window.confirm("Are you sure you want to delete all cached data? This will clear all game metadata, images, and library information.")) {
-                        return;
-                      }
-                      try {
-                        await window.openNow.deleteCache();
-                        alert("Cache cleared successfully. The app will refresh on next startup.");
-                      } catch (err) {
-                        console.error("[Settings] Failed to delete cache:", err);
-                        alert("Failed to delete cache. Please try again.");
-                      }
-                    }}
-                  >
-                    <Trash2 size={16} />
-                    Delete Cache
-                  </button>
-                </div>
-              </div>
-            </section>
           </>
         )}
 
@@ -2738,6 +2673,63 @@ export function SettingsPage({ settings, regions, onSettingChange, codecResults,
                   </div>
                 </div>
               ) : null}
+
+              <div className="settings-row">
+                <label className="settings-label">
+                  Export Logs
+                  <span className="settings-hint">Download debug logs with sensitive data redacted for privacy</span>
+                </label>
+                <button
+                  type="button"
+                  className="settings-export-logs-btn"
+                  onClick={async () => {
+                    try {
+                      const logs = await window.openNow.exportLogs("text");
+                      const blob = new Blob([logs], { type: "text/plain" });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = `opennow-logs-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      URL.revokeObjectURL(url);
+                    } catch (err) {
+                      console.error("[Settings] Failed to export logs:", err);
+                      alert("Failed to export logs. Please try again.");
+                    }
+                  }}
+                >
+                  <FileDown size={16} />
+                  Export Logs
+                </button>
+              </div>
+
+              <div className="settings-row">
+                <label className="settings-label">
+                  Delete Cache
+                  <span className="settings-hint">Clear all cached game data, images, and metadata</span>
+                </label>
+                <button
+                  type="button"
+                  className="settings-delete-cache-btn"
+                  onClick={async () => {
+                    if (!window.confirm("Are you sure you want to delete all cached data? This will clear all game metadata, images, and library information.")) {
+                      return;
+                    }
+                    try {
+                      await window.openNow.deleteCache();
+                      alert("Cache cleared successfully. The app will refresh on next startup.");
+                    } catch (err) {
+                      console.error("[Settings] Failed to delete cache:", err);
+                      alert("Failed to delete cache. Please try again.");
+                    }
+                  }}
+                >
+                  <Trash2 size={16} />
+                  Delete Cache
+                </button>
+              </div>
             </div>
           </section>
         )}
