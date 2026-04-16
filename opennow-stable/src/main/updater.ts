@@ -1,7 +1,10 @@
 import { app } from "electron";
-import { autoUpdater, type AppUpdater, type ProgressInfo, type UpdateDownloadedEvent, type UpdateInfo } from "electron-updater";
+import electronUpdater from "electron-updater";
+import type { AppUpdater, ProgressInfo, UpdateDownloadedEvent, UpdateInfo } from "electron-updater";
 
 import type { AppUpdaterState } from "@shared/gfn";
+
+const { autoUpdater } = electronUpdater;
 
 const STARTUP_CHECK_DELAY_MS = 12_000;
 const PERIODIC_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
