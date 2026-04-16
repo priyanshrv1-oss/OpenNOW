@@ -180,7 +180,7 @@ export interface Settings {
 }
 
 export type UpdaterStatus = "idle" | "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error";
-export type UpdaterReleaseNotesSource = "artifact" | "feed" | "none";
+export type UpdaterReleaseNotesSource = "feed" | "none";
 
 export interface UpdaterDownloadProgress {
   percent: number;
@@ -205,14 +205,6 @@ export interface UpdaterState {
   canInstall: boolean;
   skippedVersion: string | null;
   isSkipped: boolean;
-}
-
-export interface ReleaseNotesArtifact {
-  version: string;
-  releaseName?: string;
-  releaseDate?: string;
-  notes: string;
-  tag: string;
 }
 
 export const DEFAULT_STREAM_PREFERENCES: Readonly<Pick<Settings, "codec" | "colorQuality">> = Object.freeze({

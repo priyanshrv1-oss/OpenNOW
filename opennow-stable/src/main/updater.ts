@@ -3,9 +3,7 @@ import electronUpdater from "electron-updater";
 import type { ProgressInfo, UpdateInfo } from "electron-updater";
 
 import type {
-  ReleaseNotesArtifact,
   UpdaterDownloadProgress,
-  UpdaterReleaseNotesSource,
   UpdaterState,
   UpdaterStatus,
 } from "@shared/gfn";
@@ -15,9 +13,21 @@ import type { SettingsManager } from "./settings";
 
 const { autoUpdater } = electronUpdater;
 
-const RELEASE_NOTES_TIMEOUT_MS = 8000;
 const GITHUB_RELEASES_DOWNLOAD_PREFIX = "/releases/download/";
-const RELEASE_NOTES_ASSET_PREFIX = "release-notes-v";
+
+function isUpdaterRuntimeSupported(): boolean {
+  if (process.platform === "win32") {
+    return process.arch === "x64";
+  }
+  if (process.platform === "darwin" || process.platform === "linux") {
+    return process.arch === "x64";
+  }
+  return false;
+}
+
+function getUnsupportedUpdaterMessage(): string {
+  return `Automatic updates are not currently available on ${process.platform} ${process.arch}. Please download new releases manually.`;
+}
 
 function createInitialState(): UpdaterState {
   return {
@@ -37,22 +47,6 @@ function createInitialState(): UpdaterState {
     skippedVersion: null,
     isSkipped: false,
   };
-}
-
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
-    promise.then(
-      (value) => {
-        clearTimeout(timeout);
-        resolve(value);
-      },
-      (error: unknown) => {
-        clearTimeout(timeout);
-        reject(error);
-      },
-    );
-  });
 }
 
 function toIsoTimestamp(input: unknown): string | null {
@@ -123,21 +117,6 @@ function parseReleaseTagFromInfo(updateInfo: UpdateInfo): string | null {
   return null;
 }
 
-function buildReleaseNotesAssetUrl(tag: string, version: string): string {
-  return `https://github.com/OpenCloudGaming/OpenNOW/releases/download/${encodeURIComponent(tag)}/${RELEASE_NOTES_ASSET_PREFIX}${encodeURIComponent(version)}.json`;
-}
-
-function isReleaseNotesArtifact(value: unknown): value is ReleaseNotesArtifact {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-
-  const candidate = value as Record<string, unknown>;
-  return typeof candidate.version === "string"
-    && typeof candidate.tag === "string"
-    && typeof candidate.notes === "string";
-}
-
 function sanitizeDownloadProgress(progressInfo: ProgressInfo): UpdaterDownloadProgress {
   return {
     percent: Number.isFinite(progressInfo.percent) ? progressInfo.percent : 0,
@@ -192,7 +171,6 @@ export class UpdaterService {
 
     autoUpdater.on("update-available", (updateInfo) => {
       this.applyUpdateInfo(updateInfo, "available");
-      void this.loadPreferredReleaseNotes(updateInfo);
     });
 
     autoUpdater.on("update-not-available", () => {
@@ -256,6 +234,16 @@ export class UpdaterService {
       return this.getState();
     }
 
+    if (!isUpdaterRuntimeSupported()) {
+      if (manual) {
+        this.setState({
+          status: "error",
+          lastError: getUnsupportedUpdaterMessage(),
+        });
+      }
+      return this.getState();
+    }
+
     if (!manual && this.settingsManager && !this.settingsManager.get("autoCheckForUpdates")) {
       return this.getState();
     }
@@ -269,6 +257,14 @@ export class UpdaterService {
       this.setState({
         status: "error",
         lastError: "Auto-update is only available in packaged production builds.",
+      });
+      return this.getState();
+    }
+
+    if (!isUpdaterRuntimeSupported()) {
+      this.setState({
+        status: "error",
+        lastError: getUnsupportedUpdaterMessage(),
       });
       return this.getState();
     }
@@ -307,7 +303,7 @@ export class UpdaterService {
   }
 
   scheduleStartupCheck(delayMs = 12000): void {
-    if (!app.isPackaged || !this.settingsManager?.get("autoCheckForUpdates")) {
+    if (!app.isPackaged || !isUpdaterRuntimeSupported() || !this.settingsManager?.get("autoCheckForUpdates")) {
       return;
     }
 
@@ -359,61 +355,6 @@ export class UpdaterService {
     this.mainWindow.webContents.send(IPC_CHANNELS.UPDATES_STATE_CHANGED, this.getState());
   }
 
-  private async loadPreferredReleaseNotes(updateInfo: UpdateInfo): Promise<void> {
-    const tag = parseReleaseTagFromInfo(updateInfo);
-    const fallbackNotes = normalizeFallbackReleaseNotes(updateInfo.releaseNotes, updateInfo.version);
-    const fallbackState: Pick<UpdaterState, "releaseNotes" | "releaseNotesSource" | "releaseTag"> = {
-      releaseNotes: fallbackNotes,
-      releaseNotesSource: fallbackNotes ? "feed" : "none",
-      releaseTag: tag,
-    };
-
-    if (!tag) {
-      this.setState(fallbackState);
-      return;
-    }
-
-    try {
-      const response = await withTimeout(
-        fetch(buildReleaseNotesAssetUrl(tag, updateInfo.version), {
-          headers: {
-            Accept: "application/json",
-            "User-Agent": `OpenNOW/${app.getVersion()}`,
-          },
-        }),
-        RELEASE_NOTES_TIMEOUT_MS,
-        "Release notes request",
-      );
-
-      if (!response.ok) {
-        this.setState(fallbackState);
-        return;
-      }
-
-      const payload = await withTimeout(response.json() as Promise<unknown>, RELEASE_NOTES_TIMEOUT_MS, "Release notes parse");
-      if (!isReleaseNotesArtifact(payload)) {
-        this.setState(fallbackState);
-        return;
-      }
-
-      if (payload.version !== updateInfo.version || payload.tag !== tag) {
-        this.setState(fallbackState);
-        return;
-      }
-
-      const artifactNotes = payload.notes.trim();
-      this.setState({
-        releaseName: payload.releaseName?.trim() || updateInfo.releaseName || null,
-        releaseDate: toIsoTimestamp(payload.releaseDate) ?? toIsoTimestamp(updateInfo.releaseDate),
-        releaseNotes: artifactNotes || fallbackNotes,
-        releaseNotesSource: artifactNotes ? "artifact" : (fallbackNotes ? "feed" : "none") as UpdaterReleaseNotesSource,
-        releaseTag: payload.tag,
-      });
-    } catch (error) {
-      console.warn("[Updater] Failed to load immutable release notes artifact:", error);
-      this.setState(fallbackState);
-    }
-  }
 }
 
 let updaterService: UpdaterService | null = null;

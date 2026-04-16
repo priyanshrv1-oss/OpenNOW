@@ -181,7 +181,17 @@ jobs:
             opennow-stable/dist-release/*.zip
             opennow-stable/dist-release/*.AppImage
             opennow-stable/dist-release/*.deb
-            opennow-stable/dist-release/*.yml
+          if-no-files-found: error
+
+      - name: Upload updater metadata
+        if: matrix.label == 'windows' || matrix.label == 'macos-x64' || matrix.label == 'linux-x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: opennow-stable-${{ matrix.label }}-metadata
+          path: |
+            opennow-stable/dist-release/latest.yml
+            opennow-stable/dist-release/latest-mac.yml
+            opennow-stable/dist-release/latest-linux.yml
             opennow-stable/dist-release/*.blockmap
           if-no-files-found: error
 
@@ -205,25 +215,22 @@ jobs:
         shell: bash
         run: |
           shopt -s nullglob
-          required_assets=(
-            release-artifacts/*.exe
-            release-artifacts/*.dmg
-            release-artifacts/*.zip
-            release-artifacts/*.AppImage
-            release-artifacts/*.deb
-            release-artifacts/latest.yml
-            release-artifacts/latest-mac.yml
-            release-artifacts/latest-linux.yml
-            release-artifacts/*.blockmap
-          )
+          package_assets=(release-artifacts/*.exe release-artifacts/*.dmg release-artifacts/*.zip release-artifacts/*.AppImage release-artifacts/*.deb)
+          metadata_assets=(release-artifacts/latest.yml release-artifacts/latest-mac.yml release-artifacts/latest-linux.yml)
+          blockmap_assets=(release-artifacts/*.blockmap)
 
-          if [[ ${#required_assets[@]} -eq 0 ]]; then
-            echo "No release assets were downloaded." >&2
+          if [[ ${#package_assets[@]} -eq 0 ]]; then
+            echo "No package assets were downloaded." >&2
+            exit 1
+          fi
+
+          if [[ ${#metadata_assets[@]} -eq 0 ]]; then
+            echo "No updater metadata assets were downloaded." >&2
             exit 1
           fi
 
           echo "Release assets to publish:"
-          printf ' - %s\n' "${required_assets[@]}"
+          printf ' - %s\n' "${package_assets[@]}" "${metadata_assets[@]}" "${blockmap_assets[@]}"
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
@@ -243,44 +250,6 @@ jobs:
             release-artifacts/latest-mac.yml
             release-artifacts/latest-linux.yml
             release-artifacts/*.blockmap
-
-      - name: Generate immutable release notes artifact
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
-          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" > published-release.json
-
-          python3 - <<'PYTHON'
-          import json
-          import os
-          from pathlib import Path
-
-          payload = json.loads(Path("published-release.json").read_text())
-          version = os.environ["RELEASE_VERSION"]
-          tag = os.environ["RELEASE_TAG"]
-          artifact = {
-              "version": version,
-              "releaseName": payload.get("name") or f"OpenNOW v{version}",
-              "releaseDate": payload.get("published_at") or payload.get("created_at"),
-              "notes": (payload.get("body") or "").strip(),
-              "tag": tag,
-          }
-          out = Path("release-notes-v" + version + ".json")
-          out.write_text(json.dumps(artifact, indent=2) + "\\n")
-          PYTHON
-
-      - name: Upload immutable release notes artifact
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
-          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          gh release upload "$RELEASE_TAG" "release-notes-v$RELEASE_VERSION.json" --clobber
 
   finalize:
     name: finalize-version-bump

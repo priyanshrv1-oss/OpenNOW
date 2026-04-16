@@ -1248,6 +1248,7 @@ export function SettingsPage({ settings, updaterState, regions, onSettingChange,
   const downloadSpeedLabel = useMemo(() => formatBytesPerSecond(updaterState.downloadProgress?.bytesPerSecond), [updaterState.downloadProgress?.bytesPerSecond]);
   const lastCheckedLabel = useMemo(() => formatRelativeTimestamp(updaterState.lastCheckedAt), [updaterState.lastCheckedAt]);
   const versionLabel = useMemo(() => `Version ${updaterState.currentVersion || "Unknown"}`, [updaterState.currentVersion]);
+  const canDownloadAvailableUpdate = updaterState.availableVersion !== null && !updaterState.canInstall && !updaterState.isSkipped;
 
   return (
     <div className="settings-page">
@@ -2604,7 +2605,7 @@ export function SettingsPage({ settings, updaterState, regions, onSettingChange,
                       {updateActionBusy === "check" ? <Loader size={16} className="settings-loading-icon" /> : <RefreshCw size={16} />}
                       Check for updates
                     </button>
-                    {updaterState.status === "available" && !updaterState.downloaded && !updaterState.isSkipped && (
+                    {canDownloadAvailableUpdate && (
                       <button
                         type="button"
                         className="settings-export-logs-btn"
@@ -2652,13 +2653,13 @@ export function SettingsPage({ settings, updaterState, regions, onSettingChange,
                 <div className="settings-row settings-row--column">
                   <label className="settings-label">
                     {versionLabel}
-                    <span className="settings-hint">
+                    <span className="settings-hint" role="status" aria-live="polite" aria-atomic="true">
                       {updateStatusLabel}
                       {lastCheckedLabel ? ` • Last checked ${lastCheckedLabel}` : ""}
                     </span>
                   </label>
                   {(updaterState.availableVersion || updaterState.releaseTag) && (
-                    <span className="settings-subtle-hint">
+                    <span className="settings-subtle-hint" aria-live="polite">
                       {updaterState.availableVersion ? `Available: ${updaterState.availableVersion}` : ""}
                       {updaterState.releaseTag ? `${updaterState.availableVersion ? " • " : ""}Tag ${updaterState.releaseTag}` : ""}
                     </span>
@@ -2689,7 +2690,7 @@ export function SettingsPage({ settings, updaterState, regions, onSettingChange,
                     <div className="settings-update-progress-bar">
                       <div className="settings-update-progress-bar-fill" style={{ width: `${Math.max(0, Math.min(100, updaterState.downloadProgress.percent))}%` }} />
                     </div>
-                    <span className="settings-subtle-hint">
+                    <span className="settings-subtle-hint" role="status" aria-live="polite" aria-atomic="true">
                       {`${(updaterState.downloadProgress.transferred / (1024 * 1024)).toFixed(1)} MB / ${(updaterState.downloadProgress.total / (1024 * 1024)).toFixed(1)} MB`}
                       {downloadSpeedLabel ? ` • ${downloadSpeedLabel}` : ""}
                     </span>
@@ -2762,7 +2763,7 @@ export function SettingsPage({ settings, updaterState, regions, onSettingChange,
                   <div className="settings-row settings-row--column">
                     <div className="settings-row-top">
                       <label className="settings-label">Release Notes</label>
-                      <span className="settings-value-badge">{updaterState.releaseNotesSource === "artifact" ? "Immutable Asset" : updaterState.releaseNotesSource === "feed" ? "Release Feed" : "Unavailable"}</span>
+                      <span className="settings-value-badge">{updaterState.releaseNotesSource === "feed" ? "GitHub Release" : "Unavailable"}</span>
                     </div>
                     <pre className="settings-update-notes">{updaterState.releaseNotes ?? "No release notes were published for this release."}</pre>
                   </div>
