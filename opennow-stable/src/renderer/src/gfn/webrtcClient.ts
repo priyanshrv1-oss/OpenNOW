@@ -500,6 +500,7 @@ export class GfnWebRtcClient {
   private partiallyReliableInputChannel: RTCDataChannel | null = null;
   private controlChannel: RTCDataChannel | null = null;
   private audioContext: AudioContext | null = null;
+  private audioSourceNode: MediaStreamAudioSourceNode | null = null;
 
   private inputReady = false;
   public inputPaused = false;
@@ -1567,12 +1568,7 @@ export class GfnWebRtcClient {
     this.clearTimers();
     this.detachInputCapture();
     this.closeDataChannels();
-    if (this.audioContext) {
-      void this.audioContext.close();
-      this.audioContext = null;
-    }
-    this.options.audioElement.pause();
-    this.options.audioElement.muted = true;
+    this.cleanupAudioRouting();
     if (this.pc) {
       this.pc.onicecandidate = null;
       this.pc.ontrack = null;
@@ -1609,6 +1605,24 @@ export class GfnWebRtcClient {
     this.inputQueueDropCount = 0;
     this.inputQueuePressureLoggedAtMs = 0;
     this.inputEncoder.resetGamepadSequences();
+  }
+
+  private cleanupAudioRouting(): void {
+    if (this.audioSourceNode) {
+      try {
+        this.audioSourceNode.disconnect();
+      } catch {}
+      this.audioSourceNode = null;
+    }
+
+    if (this.audioContext) {
+      void this.audioContext.close();
+      this.audioContext = null;
+    }
+
+    this.options.audioElement.pause();
+    this.options.audioElement.currentTime = 0;
+    this.options.audioElement.muted = true;
   }
 
   private attachTrack(track: MediaStreamTrack): void {
@@ -1662,34 +1676,43 @@ export class GfnWebRtcClient {
 
     if (track.kind === "audio") {
       this.replaceTrackInStream(this.audioStream, track);
-
-      if (this.audioContext) {
-        void this.audioContext.close();
-        this.audioContext = null;
-      }
-
-      this.options.audioElement.pause();
-      this.options.audioElement.muted = true;
+      this.cleanupAudioRouting();
 
       // Route audio through an AudioContext with interactive latency hint.
       // This tells the OS audio subsystem to use the smallest possible buffer,
       // matching what the official GFN browser client does for low-latency playback.
+      let audioContext: AudioContext | null = null;
+      let audioSourceNode: MediaStreamAudioSourceNode | null = null;
+
       try {
-        const ctx = new AudioContext({
+        audioContext = new AudioContext({
           latencyHint: "interactive",
           sampleRate: 48000,
         });
-        this.audioContext = ctx;
-        const source = ctx.createMediaStreamSource(this.audioStream);
-        source.connect(ctx.destination);
+        audioSourceNode = audioContext.createMediaStreamSource(this.audioStream);
+        audioSourceNode.connect(audioContext.destination);
 
         // Resume the context (browsers require user gesture, but Electron is more lenient)
-        if (ctx.state === "suspended") {
-          void ctx.resume();
+        if (audioContext.state === "suspended") {
+          void audioContext.resume();
         }
 
-        this.log(`Audio routed through AudioContext (latency: ${(ctx.baseLatency * 1000).toFixed(1)}ms, sampleRate: ${ctx.sampleRate}Hz)`);
+        this.audioContext = audioContext;
+        this.audioSourceNode = audioSourceNode;
+
+        this.log(`Audio routed through AudioContext (latency: ${(audioContext.baseLatency * 1000).toFixed(1)}ms, sampleRate: ${audioContext.sampleRate}Hz)`);
       } catch (error) {
+        try {
+          if (audioSourceNode) {
+            audioSourceNode.disconnect();
+          }
+        } catch {}
+        try {
+          if (audioContext) {
+            void audioContext.close();
+          }
+        } catch {}
+
         // Fallback: play directly through the audio element
         this.log(`AudioContext creation failed, falling back to audio element: ${String(error)}`);
         this.options.audioElement.muted = false;
