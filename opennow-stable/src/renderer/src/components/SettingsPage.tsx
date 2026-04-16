@@ -2590,6 +2590,28 @@ export function SettingsPage({ settings, regions, onSettingChange, codecResults,
               <h2>About</h2>
             </div>
             <div className="settings-rows">
+              <div className="settings-about-card">
+                <div className="settings-about-card__eyebrow">OpenNOW</div>
+                <div className="settings-about-card__content">
+                  <div className="settings-about-card__copy">
+                    <h3>Built by Zortos, improved by contributors.</h3>
+                    <p>
+                      OpenNOW is an open project led by Zortos and shaped by people from the community. Follow development,
+                      explore the source, and report issues on GitHub.
+                    </p>
+                  </div>
+                  <a
+                    className="settings-about-card__link"
+                    href="https://github.com/OpenCloudGaming/OpenNOW"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <span>View Project Repository</span>
+                    <ExternalLink size={16} />
+                  </a>
+                </div>
+              </div>
+
               <div className="settings-row">
                 <label className="settings-label settings-label--wrap">
                   <span className="settings-label-title">
