@@ -1,4 +1,4 @@
-import { Globe, Check, Search, X, Loader, Zap, Mic, FileDown, Wifi, Trash2, Heart, Users, ExternalLink, Monitor, Keyboard } from "lucide-react";
+import { Globe, Check, Search, X, Loader, Zap, Mic, FileDown, Wifi, Trash2, Heart, Users, ExternalLink, Monitor, Keyboard, Download, RefreshCcw } from "lucide-react";
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import type { JSX } from "react";
 
@@ -10,13 +10,14 @@ import type {
   EntitledResolution,
   VideoAccelerationPreference,
   MicrophoneMode,
-  PingResult,
-  GameLanguage,
-  MicrophonePermissionResult,
-  ThankYouDataResult,
-  ThankYouContributor,
-  ThankYouSupporter,
-} from "@shared/gfn";
+    PingResult,
+    GameLanguage,
+    MicrophonePermissionResult,
+    ThankYouDataResult,
+    ThankYouContributor,
+    ThankYouSupporter,
+    AppUpdaterState,
+  } from "@shared/gfn";
 import {
   colorQualityRequiresHevc,
   keyboardLayoutOptions,
@@ -349,6 +350,51 @@ function loadCachedEntitledResolutions(): EntitledResolutionsCache | null {
   }
 }
 
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  const digits = size >= 100 || unitIndex === 0 ? 0 : size >= 10 ? 1 : 2;
+  return `${size.toFixed(digits)} ${units[unitIndex]}`;
+}
+
+function formatUpdaterTimestamp(value?: number): string | null {
+  if (!value) return null;
+  try {
+    return new Date(value).toLocaleString();
+  } catch {
+    return null;
+  }
+}
+
+function getUpdaterBadgeLabel(state: AppUpdaterState): string {
+  switch (state.status) {
+    case "disabled":
+      return "Packaged builds only";
+    case "idle":
+      return "Idle";
+    case "checking":
+      return "Checking";
+    case "available":
+      return "Update available";
+    case "not-available":
+      return "Up to date";
+    case "downloading":
+      return "Downloading";
+    case "downloaded":
+      return "Ready to install";
+    case "error":
+      return "Error";
+    default:
+      return "Idle";
+  }
+}
+
 function saveCachedEntitledResolutions(cache: EntitledResolutionsCache): void {
   try {
     window.sessionStorage.setItem(ENTITLED_RESOLUTIONS_STORAGE_KEY, JSON.stringify(cache));
@@ -469,6 +515,15 @@ export function SettingsPage({ settings, regions, onSettingChange, codecResults,
   const resolutionDropdownRef = useRef<HTMLDivElement | null>(null);
   const [settingsSearch, setSettingsSearch] = useState("");
   const [codecAdvancedOpen, setCodecAdvancedOpen] = useState(false);
+  const [updaterState, setUpdaterState] = useState<AppUpdaterState>({
+    status: "idle",
+    currentVersion: "0.0.0",
+    updateSource: "github-releases",
+    canCheck: false,
+    canDownload: false,
+    canInstall: false,
+    isPackaged: false,
+  });
 
   // Dynamic entitled resolutions from MES API
   const [entitledResolutions, setEntitledResolutions] = useState<EntitledResolution[]>([]);
@@ -505,6 +560,29 @@ export function SettingsPage({ settings, regions, onSettingChange, codecResults,
   useEffect(() => {
     setRecordingInput(settings.shortcutToggleRecording);
   }, [settings.shortcutToggleRecording]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void window.openNow.getUpdaterState().then((state) => {
+      if (!cancelled) {
+        setUpdaterState(state);
+      }
+    }).catch((error) => {
+      console.warn("[Settings] Failed to load updater state:", error);
+    });
+
+    const unsubscribe = window.openNow.onUpdaterStateChanged((state) => {
+      if (!cancelled) {
+        setUpdaterState(state);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
 
   // Fetch subscription data (cached per account; reload only when account changes)
   useEffect(() => {
@@ -564,6 +642,15 @@ export function SettingsPage({ settings, regions, onSettingChange, codecResults,
     [entitledResolutions, settings.resolution, hasDynamic]
   );
   const posterSizePercent = Math.round(settings.posterSizeScale * 100);
+  const updaterLastCheckedLabel = useMemo(() => formatUpdaterTimestamp(updaterState.lastCheckedAt), [updaterState.lastCheckedAt]);
+  const updaterProgressPercent = updaterState.progress ? Math.max(0, Math.min(100, Math.round(updaterState.progress.percent))) : 0;
+  const updaterProgressLabel = updaterState.progress
+    ? `${formatBytes(updaterState.progress.transferred)} / ${formatBytes(updaterState.progress.total || updaterState.progress.transferred)}`
+    : null;
+  const updaterDownloadRateLabel = updaterState.progress?.bytesPerSecond
+    ? `${formatBytes(updaterState.progress.bytesPerSecond)}/s`
+    : null;
+  const updaterBadgeLabel = useMemo(() => getUpdaterBadgeLabel(updaterState), [updaterState]);
 
   const selectedResolutionLabel = useMemo(() => {
     if (hasDynamic) {
@@ -2498,6 +2585,90 @@ export function SettingsPage({ settings, regions, onSettingChange, codecResults,
                 <h2>Miscellaneous</h2>
               </div>
               <div className="settings-rows">
+                <div className="settings-row">
+                  <label className="settings-label settings-label--wrap">
+                    <span className="settings-label-title">
+                      Application Updates
+                      <span className={`settings-inline-badge settings-inline-badge--updater settings-inline-badge--updater-${updaterState.status}`}>
+                        {updaterBadgeLabel}
+                      </span>
+                    </span>
+                    <span className="settings-hint">
+                      Version {updaterState.currentVersion} · Packaged builds check GitHub Releases in the background.
+                    </span>
+                    {updaterState.message ? (
+                      <span className="settings-hint settings-hint--updater-message">{updaterState.message}</span>
+                    ) : null}
+                    {updaterLastCheckedLabel ? (
+                      <span className="settings-hint">Last checked: {updaterLastCheckedLabel}</span>
+                    ) : null}
+                    {updaterState.availableVersion && updaterState.status !== "downloaded" ? (
+                      <span className="settings-hint">Available version: {updaterState.availableVersion}</span>
+                    ) : null}
+                    {updaterState.downloadedVersion ? (
+                      <span className="settings-hint">Downloaded version: {updaterState.downloadedVersion}</span>
+                    ) : null}
+                    {updaterState.status === "downloading" && updaterState.progress ? (
+                      <span className="settings-hint">
+                        Download progress: {updaterProgressPercent}%{updaterProgressLabel ? ` · ${updaterProgressLabel}` : ""}{updaterDownloadRateLabel ? ` · ${updaterDownloadRateLabel}` : ""}
+                      </span>
+                    ) : null}
+                  </label>
+                  <div className="settings-updater-actions">
+                    <button
+                      type="button"
+                      className="settings-export-logs-btn"
+                      disabled={!updaterState.canCheck}
+                      onClick={() => {
+                        void window.openNow.checkForUpdates().catch((error) => {
+                          console.error("[Settings] Failed to trigger update check:", error);
+                        });
+                      }}
+                    >
+                      {updaterState.status === "checking" ? <Loader size={16} className="spin" /> : <RefreshCcw size={16} />}
+                      Check for Updates
+                    </button>
+                    {updaterState.status === "available" ? (
+                      <button
+                        type="button"
+                        className="settings-export-logs-btn"
+                        disabled={!updaterState.canDownload}
+                        onClick={() => {
+                          void window.openNow.downloadUpdate().catch((error) => {
+                            console.error("[Settings] Failed to download update:", error);
+                          });
+                        }}
+                      >
+                        <Download size={16} />
+                        Download Update
+                      </button>
+                    ) : null}
+                    {updaterState.status === "downloaded" ? (
+                      <button
+                        type="button"
+                        className="settings-save-btn settings-save-btn--compact"
+                        disabled={!updaterState.canInstall}
+                        onClick={() => {
+                          void window.openNow.installUpdateAndRestart().catch((error) => {
+                            console.error("[Settings] Failed to install update:", error);
+                          });
+                        }}
+                      >
+                        <RefreshCcw size={16} />
+                        Restart to Install
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+
+                {updaterState.status === "downloading" && updaterState.progress ? (
+                  <div className="settings-row settings-row--column">
+                    <div className="settings-updater-progress">
+                      <div className="settings-updater-progress-bar" style={{ width: `${updaterProgressPercent}%` }} />
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="settings-row">
                   <label className="settings-label">
                     Export Logs

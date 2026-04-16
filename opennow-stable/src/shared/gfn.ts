@@ -657,6 +657,39 @@ export type MainToRendererSignalingEvent =
 /** Dialog result for session conflict resolution */
 export type SessionConflictChoice = "resume" | "new" | "cancel";
 
+export type AppUpdaterStatus =
+  | "disabled"
+  | "idle"
+  | "checking"
+  | "available"
+  | "not-available"
+  | "downloading"
+  | "downloaded"
+  | "error";
+
+export interface AppUpdaterProgress {
+  percent: number;
+  transferred: number;
+  total: number;
+  bytesPerSecond: number;
+}
+
+export interface AppUpdaterState {
+  status: AppUpdaterStatus;
+  currentVersion: string;
+  availableVersion?: string;
+  downloadedVersion?: string;
+  progress?: AppUpdaterProgress;
+  lastCheckedAt?: number;
+  message?: string;
+  errorCode?: string;
+  updateSource: "github-releases";
+  canCheck: boolean;
+  canDownload: boolean;
+  canInstall: boolean;
+  isPackaged: boolean;
+}
+
 export interface OpenNowApi {
   getAuthSession(input?: AuthSessionRequest): Promise<AuthSessionResult>;
   getLoginProviders(): Promise<LoginProvider[]>;
@@ -688,6 +721,11 @@ export interface OpenNowApi {
   /** Listen for F11 fullscreen toggle from main process */
   onToggleFullscreen(listener: () => void): () => void;
   quitApp(): Promise<void>;
+  getUpdaterState(): Promise<AppUpdaterState>;
+  checkForUpdates(): Promise<AppUpdaterState>;
+  downloadUpdate(): Promise<AppUpdaterState>;
+  installUpdateAndRestart(): Promise<AppUpdaterState>;
+  onUpdaterStateChanged(listener: (state: AppUpdaterState) => void): () => void;
   setFullscreen(v: boolean): Promise<void>;
   toggleFullscreen(): Promise<void>;
   togglePointerLock(): Promise<void>;
