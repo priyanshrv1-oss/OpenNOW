@@ -880,6 +880,13 @@ export class GfnWebRtcClient {
     this.emitStats();
   }
 
+  private clearCandidateState(): void {
+    this.queuedCandidates = [];
+    this.queuedCandidateKeys.clear();
+    this.remoteCandidates = [];
+    this.remoteCandidateKeys.clear();
+  }
+
   private remoteCandidateKey(candidate: RTCIceCandidateInit): string {
     return JSON.stringify([
       candidate.candidate,
@@ -1601,10 +1608,6 @@ export class GfnWebRtcClient {
     this.inputQueueDropCount = 0;
     this.inputQueuePressureLoggedAtMs = 0;
     this.inputEncoder.resetGamepadSequences();
-    this.queuedCandidates = [];
-    this.queuedCandidateKeys.clear();
-    this.remoteCandidates = [];
-    this.remoteCandidateKeys.clear();
   }
 
   private attachTrack(track: MediaStreamTrack): void {
@@ -3397,6 +3400,7 @@ export class GfnWebRtcClient {
   }
 
   async handleOffer(offerSdp: string, session: SessionInfo, settings: OfferSettings): Promise<void> {
+    this.clearCandidateState();
     this.cleanupPeerConnection();
     const connectionAttemptId = ++this.connectionAttemptId;
     this.log("=== handleOffer START ===");
@@ -3921,7 +3925,7 @@ export class GfnWebRtcClient {
     pc.oniceconnectionstatechange = () => {
       if (!isCurrentConnectionAttempt() || this.pc !== pc) return;
       this.log(`ICE connection state: ${pc.iceConnectionState}`);
-      if ((pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") && !triedRelay) {
+      if (pc.iceConnectionState === "failed" && !triedRelay) {
         void attemptRelayFallback();
       }
     };
@@ -3965,6 +3969,7 @@ export class GfnWebRtcClient {
 
   dispose(): void {
     this.cleanupPeerConnection();
+    this.clearCandidateState();
 
     // Cleanup microphone
     if (this.micManager) {

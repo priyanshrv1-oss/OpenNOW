@@ -691,6 +691,25 @@ async function createRecordingDraft(recordingId: string, mimeType: string): Prom
 function enqueueRecordingWrite(state: RecordingDraft, chunk: ArrayBuffer): Promise<void> { state.pendingWrite = state.pendingWrite.then(async () => { await appendBase64File(state.filePath, encodeBase64(new Uint8Array(chunk.slice(0))), { relativeToBaseDir: false }); }); return state.pendingWrite; }
 async function cleanupRecordingDraft(state: RecordingDraft): Promise<void> { await state.pendingWrite.catch(() => undefined); await deleteFile(state.filePath, { relativeToBaseDir: false }); }
 
+async function applyAndroidFullscreen(value: boolean): Promise<void> {
+  document.body.dataset.androidFullscreen = value ? "true" : "false";
+  if (value) {
+    await StatusBar.hide().catch(() => undefined);
+    return;
+  }
+  await StatusBar.show().catch(() => undefined);
+  await StatusBar.setStyle({ style: Style.Dark }).catch(() => undefined);
+}
+
+async function exitAndroidFullscreenState(): Promise<void> {
+  if (document.fullscreenElement) {
+    await document.exitFullscreen().catch(() => undefined);
+  }
+  if (document.body.dataset.androidFullscreen === "true") {
+    await applyAndroidFullscreen(false);
+  }
+}
+
 const signalingListeners = new Set<(event: MainToRendererSignalingEvent) => void>();
 let signalingClient: BrowserSignalingClient | null = null;
 const recordingStates = new Map<string, RecordingDraft>();
@@ -727,8 +746,8 @@ const api: OpenNowApi = {
   downloadUpdate: async (): Promise<AppUpdaterState> => DEFAULT_ANDROID_UPDATER_STATE,
   installUpdateAndRestart: async (): Promise<AppUpdaterState> => DEFAULT_ANDROID_UPDATER_STATE,
   onUpdaterStateChanged: () => () => undefined,
-  toggleFullscreen: async () => { const next = document.body.dataset.androidFullscreen !== "true"; document.body.dataset.androidFullscreen = next ? "true" : "false"; if (next) { await StatusBar.hide().catch(() => undefined); } else { await StatusBar.show().catch(() => undefined); await StatusBar.setStyle({ style: Style.Dark }).catch(() => undefined); } },
-  setFullscreen: async (value: boolean) => { document.body.dataset.androidFullscreen = value ? "true" : "false"; if (value) { await StatusBar.hide().catch(() => undefined); } else { await StatusBar.show().catch(() => undefined); await StatusBar.setStyle({ style: Style.Dark }).catch(() => undefined); } },
+  toggleFullscreen: async () => { const next = document.body.dataset.androidFullscreen !== "true"; await applyAndroidFullscreen(next); },
+  setFullscreen: async (value: boolean) => { await applyAndroidFullscreen(value); },
   togglePointerLock: async () => unsupported("Pointer lock is not supported on Android."),
   getSettings: async () => getStoredSettings(),
   setSetting: async (key, value) => { const current = await getStoredSettings(); await saveSettings({ ...current, [key]: value }); },
@@ -757,6 +776,10 @@ const api: OpenNowApi = {
   getThanksData: async (): Promise<ThankYouDataResult> => { const cached = await readPreferenceJson<ThankYouDataResult | null>(THANKS_CACHE_KEY, null); if (cached) return cached; const placeholder: ThankYouDataResult = { contributors: [], supporters: [], contributorsError: "Community data is unavailable on Android in this pass." }; await writePreferenceJson(THANKS_CACHE_KEY, placeholder); return placeholder; },
 };
 
-void CapacitorApp.addListener("backButton", () => { if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined); });
+void CapacitorApp.addListener("backButton", () => {
+  if (document.fullscreenElement || document.body.dataset.androidFullscreen === "true") {
+    void exitAndroidFullscreenState();
+  }
+});
 
 export const capacitorPlatform: OpenNowPlatform = { info: { kind: "android", capabilities: { isAndroid: true, isElectron: false, supportsQuitApp: false, supportsPointerLockToggle: false, supportsDesktopFullscreen: false, supportsLogExport: false, supportsCacheDeletion: false, supportsMediaFolderAccess: false, supportsScreenshotExport: false, supportsPersistentMedia: true, supportsKeyboardShortcuts: false, supportsControllerExitApp: false } }, api };
