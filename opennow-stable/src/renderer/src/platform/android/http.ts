@@ -18,6 +18,9 @@ async function parseResponse<T>(response: HttpResponse, responseType: "json" | "
   }
 
   if (typeof response.data === "string") {
+    if (response.data.trim().length === 0) {
+      return undefined as T;
+    }
     return JSON.parse(response.data) as T;
   }
   return response.data as T;

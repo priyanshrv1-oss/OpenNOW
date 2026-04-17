@@ -7,6 +7,28 @@ function normalizePath(path: string): string {
   return path.startsWith(`${BASE_DIR}/`) ? path : `${BASE_DIR}/${path}`;
 }
 
+function filesystemErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
+function isMissingFilesystemError(error: unknown): boolean {
+  const message = filesystemErrorMessage(error).toLowerCase();
+  return message.includes("does not exist")
+    || message.includes("not found")
+    || message.includes("no such file")
+    || message.includes("no such directory")
+    || message.includes("file_notfound")
+    || message.includes("file does not exist");
+}
+
+function isAlreadyExistsFilesystemError(error: unknown): boolean {
+  const message = filesystemErrorMessage(error).toLowerCase();
+  return message.includes("already exists") || message.includes("file exists");
+}
+
 export async function getPreferenceJson<T>(key: string, fallback: T): Promise<T> {
   const { value } = await Preferences.get({ key });
   if (!value) return fallback;
@@ -28,8 +50,11 @@ export async function removePreference(key: string): Promise<void> {
 export async function ensureDir(path: string): Promise<void> {
   try {
     await Filesystem.mkdir({ path, directory: Directory.Data, recursive: true });
-  } catch {
-    return;
+  } catch (error) {
+    if (isAlreadyExistsFilesystemError(error)) {
+      return;
+    }
+    throw error;
   }
 }
 
@@ -63,8 +88,11 @@ export async function deleteFile(path: string): Promise<void> {
   const normalized = normalizePath(path);
   try {
     await Filesystem.deleteFile({ path: normalized, directory: Directory.Data });
-  } catch {
-    return;
+  } catch (error) {
+    if (isMissingFilesystemError(error)) {
+      return;
+    }
+    throw error;
   }
 }
 
@@ -73,23 +101,54 @@ export async function readDir(path: string): Promise<string[]> {
   try {
     const result = await Filesystem.readdir({ path: normalized, directory: Directory.Data });
     return result.files.map((file) => file.name);
-  } catch {
-    return [];
+  } catch (error) {
+    if (isMissingFilesystemError(error)) {
+      return [];
+    }
+    throw error;
   }
 }
 
-export async function clearDirectory(path: string): Promise<void> {
-  const names = await readDir(path);
-  await Promise.all(names.map(async (name) => {
-    const childPath = `${path}/${name}`;
-    try {
-      await Filesystem.deleteFile({ path: normalizePath(childPath), directory: Directory.Data });
+async function clearDirectoryNormalized(path: string): Promise<void> {
+  const entries = await Filesystem.readdir({ path, directory: Directory.Data }).catch((error) => {
+    if (isMissingFilesystemError(error)) {
+      return null;
+    }
+    throw error;
+  });
+  if (!entries) {
+    return;
+  }
+
+  await Promise.all(entries.files.map(async (entry) => {
+    const childPath = `${path}/${entry.name}`;
+    if (entry.type === "directory") {
+      await clearDirectoryNormalized(childPath);
+      try {
+        await Filesystem.rmdir({ path: childPath, directory: Directory.Data });
+      } catch (error) {
+        if (isMissingFilesystemError(error)) {
+          return;
+        }
+        throw error;
+      }
       return;
-    } catch {
-      await clearDirectory(childPath);
-      await Filesystem.rmdir({ path: normalizePath(childPath), directory: Directory.Data }).catch(() => undefined);
+    }
+
+    try {
+      await Filesystem.deleteFile({ path: childPath, directory: Directory.Data });
+      return;
+    } catch (error) {
+      if (isMissingFilesystemError(error)) {
+        return;
+      }
+      throw error;
     }
   }));
+}
+
+export async function clearDirectory(path: string): Promise<void> {
+  await clearDirectoryNormalized(normalizePath(path));
 }
 
 export function toBase64DataUrl(mimeType: string, data: string): string {

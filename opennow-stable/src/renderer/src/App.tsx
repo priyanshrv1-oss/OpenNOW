@@ -3269,6 +3269,10 @@ export function App(): JSX.Element {
         return;
       }
 
+      if (!platformCapabilities.supportsKeyboardShortcuts) {
+        return;
+      }
+
       if (isShortcutMatch(e, shortcuts.toggleStats)) {
         e.preventDefault();
         e.stopPropagation();
