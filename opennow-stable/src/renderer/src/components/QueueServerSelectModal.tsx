@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
 import type { GameInfo, PrintedWasteQueueData, PrintedWasteZone } from "@shared/gfn";
+import { openNow } from "../platform";
 
 // ── Constants / helpers ───────────────────────────────────────────────────────
 
@@ -57,8 +58,9 @@ const REGION_META: Record<string, { label: string; flag: string }> = {
 };
 const REGION_ORDER = ["US", "CA", "EU", "JP", "KR", "THAI", "MY"];
 const PRINTEDWASTE_PING_CACHE_KEY = "opennow.printedwaste-pings.v1";
-const MAX_PING_ZONES_PER_OPEN = 12;
 const QUEUE_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
+const AUTO_PING_WEIGHT = 0.75;
+const AUTO_QUEUE_WEIGHT = 0.25;
 
 interface PingCacheEntry {
   url: string;
@@ -117,6 +119,7 @@ export function QueueServerSelectModal({ game, initialQueueData = null, onConfir
   const [queueData,  setQueueData]  = useState<PrintedWasteQueueData | null>(initialQueueData);
   const [queueLoading, setQueueLoading] = useState(initialQueueData === null);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [nukedZoneIds, setNukedZoneIds] = useState<Set<string> | null>(null);
 
   // Ping state — populated after queue data loads
   const [zonePings,  setZonePings]  = useState<Map<string, number | null> | null>(null);
@@ -131,7 +134,7 @@ export function QueueServerSelectModal({ game, initialQueueData = null, onConfir
     let cancelled = false;
     void (async () => {
       try {
-        const data = await window.openNow.fetchPrintedWasteQueue();
+        const data = await openNow.fetchPrintedWasteQueue();
         if (!cancelled) setQueueData(data);
       } catch {
         if (!cancelled) setFetchError("Could not load queue data. You can still launch with default routing.");
@@ -151,7 +154,7 @@ export function QueueServerSelectModal({ game, initialQueueData = null, onConfir
       if (inFlight) return;
       inFlight = true;
       try {
-        const data = await window.openNow.fetchPrintedWasteQueue();
+        const data = await openNow.fetchPrintedWasteQueue();
         if (cancelled) return;
         setQueueData(data);
         setFetchError(null);
@@ -176,18 +179,53 @@ export function QueueServerSelectModal({ game, initialQueueData = null, onConfir
     dialogRef.current?.focus();
   }, []);
 
+  // Fetch PrintedWaste server metadata and hide zones flagged as nuked.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const mapping = await openNow.fetchPrintedWasteServerMapping();
+        if (cancelled) return;
+        const nextNuked = new Set<string>();
+        for (const [zoneId, meta] of Object.entries(mapping)) {
+          if (isStandardZone(zoneId) && meta.nuked === true) {
+            nextNuked.add(zoneId);
+          }
+        }
+        setNukedZoneIds(nextNuked);
+      } catch (error) {
+        // PrintedWaste metadata is required for queue checks. If unavailable,
+        // bypass this modal and continue launch with default routing.
+        if (!cancelled) {
+          console.warn("[QueueServerSelect] PrintedWaste mapping unavailable, skipping queue checks.", error);
+          onConfirm(null);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [onConfirm]);
+
   // ── Ping all standard zones once queue data arrives ───────────────────────
   useEffect(() => {
-    if (!queueData) return;
+    if (nukedZoneIds === null) return;
+    if (!queueData) {
+      setZonePings(null);
+      setIsPinging(false);
+      return;
+    }
     const allStandardZones = Object.entries(queueData)
-      .filter(([zoneId]) => isStandardZone(zoneId))
+      .filter(([zoneId]) => isStandardZone(zoneId) && !nukedZoneIds.has(zoneId))
       .map(([zoneId, zone]) => ({
         zoneId,
         pwRegion: zone.Region,
         queuePosition: zone.QueuePosition,
         routingUrl: constructZoneUrl(zoneId),
       }));
-    if (allStandardZones.length === 0) return;
+    if (allStandardZones.length === 0) {
+      setZonePings(new Map());
+      setIsPinging(false);
+      return;
+    }
 
     let cancelled = false;
     const cachedPings = loadStoredPingResults();
@@ -217,17 +255,20 @@ export function QueueServerSelectModal({ game, initialQueueData = null, onConfir
         .sort((a, b) => a.queuePosition - b.queuePosition),
     ];
 
-    const zonesToPing = prioritized
-      .filter((zone) => !seedMap.has(zone.routingUrl))
-      .slice(0, MAX_PING_ZONES_PER_OPEN);
+    // Always ping every standard zone so Auto recommendations are based on
+    // fresh measurements instead of stale cached latency.
+    const zonesToPing = prioritized;
 
-    if (zonesToPing.length === 0) return;
+    if (zonesToPing.length === 0) {
+      setIsPinging(false);
+      return;
+    }
     const regionsToTest = zonesToPing.map((zone) => ({ name: zone.zoneId, url: zone.routingUrl }));
 
     setIsPinging(true);
     void (async () => {
       try {
-        const results = await window.openNow.pingRegions(regionsToTest);
+        const results = await openNow.pingRegions(regionsToTest);
         if (cancelled) return;
         const map = new Map(seedMap);
         for (const r of results) map.set(r.url, r.pingMs);
@@ -240,13 +281,13 @@ export function QueueServerSelectModal({ game, initialQueueData = null, onConfir
       }
     })();
     return () => { cancelled = true; };
-  }, [queueData]);
+  }, [queueData, nukedZoneIds]);
 
   // ── Build enriched zone list (standard zones only) ────────────────────────
   const zones = useMemo<ZoneInfo[]>(() => {
     if (!queueData) return [];
     return Object.entries(queueData)
-      .filter(([zoneId]) => isStandardZone(zoneId))
+      .filter(([zoneId]) => isStandardZone(zoneId) && !nukedZoneIds?.has(zoneId))
       .map(([zoneId, zone]: [string, PrintedWasteZone]) => {
         const routingUrl = constructZoneUrl(zoneId);
         const pingMs = zonePings?.get(routingUrl) ?? null;
@@ -259,11 +300,21 @@ export function QueueServerSelectModal({ game, initialQueueData = null, onConfir
           pingMs,
         };
       });
-  }, [queueData, zonePings]);
+  }, [queueData, zonePings, nukedZoneIds]);
+
+  // If queue refresh removes a previously selected manual zone, fall back to auto.
+  useEffect(() => {
+    if (selected === "auto" || selected === "closest") return;
+    const stillExists = zones.some((zone) => zone.zoneId === selected);
+    if (!stillExists) {
+      setSelected("auto");
+    }
+  }, [selected, zones]);
 
   // ── Recommendations ───────────────────────────────────────────────────────
 
-  // Auto: weighted lowest score (40% ping + 60% queue). Falls back to queue-only
+  // Auto: weighted lowest score with strict ping preference (75% ping + 25% queue).
+  // Falls back to queue-only
   // when ping data isn't in yet.
   const autoZone = useMemo<ZoneInfo | null>(() => {
     if (zones.length === 0) return null;
@@ -272,8 +323,11 @@ export function QueueServerSelectModal({ game, initialQueueData = null, onConfir
     const maxPing  = Math.max(...pool.map((z) => z.pingMs ?? 999), 1);
     const maxQueue = Math.max(...pool.map((z) => z.queuePosition), 1);
     return pool.reduce((best, z) => {
-      const score = ((z.pingMs ?? maxPing) / maxPing) * 0.4 + (z.queuePosition / maxQueue) * 0.6;
-      const bScore = ((best.pingMs ?? maxPing) / maxPing) * 0.4 + (best.queuePosition / maxQueue) * 0.6;
+      const score = ((z.pingMs ?? maxPing) / maxPing) * AUTO_PING_WEIGHT + (z.queuePosition / maxQueue) * AUTO_QUEUE_WEIGHT;
+      const bScore = ((best.pingMs ?? maxPing) / maxPing) * AUTO_PING_WEIGHT + (best.queuePosition / maxQueue) * AUTO_QUEUE_WEIGHT;
+      if (score === bScore && z.pingMs !== null && best.pingMs !== null) {
+        return z.pingMs < best.pingMs ? z : best;
+      }
       return score < bScore ? z : best;
     }, pool[0]!);
   }, [zones]);
@@ -311,10 +365,10 @@ export function QueueServerSelectModal({ game, initialQueueData = null, onConfir
     if (selected === "auto") {
       onConfirm(autoZone?.routingUrl ?? null);
     } else if (selected === "closest") {
-      onConfirm(closestZone?.routingUrl ?? null);
+      onConfirm(closestZone?.routingUrl ?? autoZone?.routingUrl ?? null);
     } else {
       const zone = zones.find((z) => z.zoneId === selected);
-      onConfirm(zone?.routingUrl ?? null);
+      onConfirm(zone?.routingUrl ?? autoZone?.routingUrl ?? null);
     }
   }, [selected, autoZone, closestZone, zones, onConfirm]);
 
@@ -323,7 +377,7 @@ export function QueueServerSelectModal({ game, initialQueueData = null, onConfir
     if (e.key === "Enter")  handleConfirm();
   }, [onCancel, handleConfirm]);
 
-  const isLoading = queueLoading;
+  const isLoading = queueLoading || nukedZoneIds === null;
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (

@@ -12,6 +12,11 @@ import type {
   AuthSessionRequest,
   AuthSessionResult,
   AuthTokens,
+  AppUpdaterState,
+  CatalogBrowseRequest,
+  CatalogBrowseResult,
+  CatalogFilterGroup,
+  CatalogSortOption,
   GameInfo,
   IceCandidatePayload,
   KeyframeRequest,
@@ -50,6 +55,8 @@ import type {
   SubscriptionFetchRequest,
   SubscriptionInfo,
   ThankYouDataResult,
+  PrintedWasteQueueData,
+  PrintedWasteServerMapping,
 } from "@shared/gfn";
 import { DEFAULT_KEYBOARD_LAYOUT, colorQualityBitDepth, colorQualityChromaFormat, resolveGfnKeyboardLayout } from "@shared/gfn";
 import {
@@ -89,6 +96,24 @@ const PUBLIC_GAMES_URL = "https://static.nvidiagrid.net/supported-public-game-li
 const PANELS_QUERY_HASH = "f8e26265a5db5c20e1334a6872cf04b6e3970507697f6ae55a6ddefa5420daf0";
 const APP_METADATA_QUERY_HASH = "39187e85b6dcf60b7279a5f233288b0a8b69a8b1dbcfb5b25555afdcb988f0d7";
 const DEFAULT_LOCALE = "en_US";
+const PRINTEDWASTE_QUEUE_URL = "https://api.printedwaste.com/gfn/queue/";
+const PRINTEDWASTE_SERVER_MAPPING_URL = "https://remote.printedwaste.com/config/GFN_SERVERID_TO_REGION_MAPPING";
+const DEFAULT_ANDROID_UPDATER_STATE: AppUpdaterState = {
+  status: "disabled",
+  currentVersion: "android",
+  updateSource: "github-releases",
+  message: "App updates are not supported on Android in this pass.",
+  canCheck: false,
+  canDownload: false,
+  canInstall: false,
+  isPackaged: false,
+};
+const ANDROID_CATALOG_SORT_OPTIONS: CatalogSortOption[] = [
+  { id: "relevance", label: "Recommended", orderBy: "RELEVANCE" },
+  { id: "title_az", label: "Title (A-Z)", orderBy: "TITLE_ASC" },
+  { id: "title_za", label: "Title (Z-A)", orderBy: "TITLE_DESC" },
+  { id: "last_played", label: "Last played", orderBy: "LAST_PLAYED_DESC" },
+];
 
 interface LocalhostAuthPlugin {
   startLogin(options: { authUrl: string; port: number; timeoutMs?: number }): Promise<{ code: string; redirectUri?: string }>;
@@ -332,6 +357,191 @@ async function fetchAppMetaData(token: string, appIds: string[], vpcId: string):
 async function enrichGamesWithMetadata(token: string, vpcId: string, games: GameInfo[]): Promise<GameInfo[]> { const uuids = [...new Set(games.map((game) => game.uuid).filter((uuid): uuid is string => Boolean(uuid)))]; if (uuids.length === 0) return games; const appById = new Map<string, AppData>(); for (let index = 0; index < uuids.length; index += 40) { const payload = await fetchAppMetaData(token, uuids.slice(index, index + 40), vpcId); if (payload.errors?.length) throw new Error(payload.errors.map((error) => error.message).join(", ")); for (const app of payload.data?.apps?.items ?? []) appById.set(app.id, app); } return games.map((game) => { if (!game.uuid) return game; const metadata = appById.get(game.uuid); return metadata ? mergeAppMetaIntoGame(game, metadata) : game; }); }
 async function fetchCatalog(kind: "MAIN" | "LIBRARY", token: string, providerStreamingBaseUrl?: string): Promise<GameInfo[]> { const vpcId = await getVpcId(token, providerStreamingBaseUrl); const payload = await fetchPanels(token, [kind], vpcId); return enrichGamesWithMetadata(token, vpcId, flattenPanels(payload)); }
 async function fetchPublicCatalog(): Promise<GameInfo[]> { const payload = await httpRequest<RawPublicGame[]>(PUBLIC_GAMES_URL, { headers: { "User-Agent": GFN_USER_AGENT } }); return payload.filter((item) => item.status === "AVAILABLE" && item.title).map((item) => { const id = String(item.id ?? item.title ?? "unknown"); const steamAppId = item.steamUrl?.split("/app/")[1]?.split("/")[0]; return { id, uuid: id, launchAppId: isNumericId(id) ? id : undefined, title: item.title ?? id, selectedVariantIndex: 0, variants: [{ id, store: "Unknown", supportedControls: [] }], imageUrl: steamAppId ? `https://cdn.cloudflare.steamstatic.com/steam/apps/${steamAppId}/library_600x900.jpg` : undefined } satisfies GameInfo; }); }
+function catalogSearchText(game: GameInfo): string {
+  return [
+    game.title,
+    game.description,
+    game.longDescription,
+    game.publisherName,
+    ...(game.genres ?? []),
+    ...(game.featureLabels ?? []),
+    ...game.variants.map((variant) => variant.store),
+  ]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .join(" ")
+    .toLowerCase();
+}
+function toCatalogOptionId(groupId: string, rawValue: string): string {
+  return `${groupId}:${rawValue.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+}
+function buildAndroidCatalogFilterGroups(games: GameInfo[]): CatalogFilterGroup[] {
+  const stores = new Map<string, string>();
+  const genres = new Map<string, string>();
+  const subscriptions = new Map<string, string>();
+  for (const game of games) {
+    for (const variant of game.variants) {
+      const store = variant.store?.trim();
+      if (store) stores.set(toCatalogOptionId("digital_store", store), store);
+    }
+    for (const genre of game.genres ?? []) {
+      const value = genre.trim();
+      if (value) genres.set(toCatalogOptionId("genre", value), value);
+    }
+    const tier = game.membershipTierLabel?.trim();
+    if (tier) subscriptions.set(toCatalogOptionId("subscriptions", tier), tier);
+  }
+  const groups: CatalogFilterGroup[] = [];
+  if (stores.size > 0) {
+    groups.push({
+      id: "digital_store",
+      label: "Stores",
+      options: [...stores.entries()].map(([id, label]) => ({ id, rawId: label, label, groupId: "digital_store", groupLabel: "Stores" })),
+    });
+  }
+  if (genres.size > 0) {
+    groups.push({
+      id: "genre",
+      label: "Genres",
+      options: [...genres.entries()].map(([id, label]) => ({ id, rawId: label, label, groupId: "genre", groupLabel: "Genres" })),
+    });
+  }
+  if (subscriptions.size > 0) {
+    groups.push({
+      id: "subscriptions",
+      label: "Membership",
+      options: [...subscriptions.entries()].map(([id, label]) => ({ id, rawId: label, label, groupId: "subscriptions", groupLabel: "Membership" })),
+    });
+  }
+  return groups;
+}
+function gameMatchesCatalogFilter(game: GameInfo, filterId: string): boolean {
+  const [groupId, ...rest] = filterId.split(":");
+  const normalizedValue = rest.join(":");
+  if (!groupId || !normalizedValue) return true;
+  switch (groupId) {
+    case "digital_store":
+      return game.variants.some((variant) => toCatalogOptionId("digital_store", variant.store) === filterId);
+    case "genre":
+      return (game.genres ?? []).some((genre) => toCatalogOptionId("genre", genre) === filterId);
+    case "subscriptions":
+      return Boolean(game.membershipTierLabel && toCatalogOptionId("subscriptions", game.membershipTierLabel) === filterId);
+    default:
+      return true;
+  }
+}
+function sortAndroidCatalogGames(games: GameInfo[], sortId: string): GameInfo[] {
+  const sorted = [...games];
+  switch (sortId) {
+    case "title_az":
+      sorted.sort((a, b) => a.title.localeCompare(b.title));
+      break;
+    case "title_za":
+      sorted.sort((a, b) => b.title.localeCompare(a.title));
+      break;
+    case "last_played":
+      sorted.sort((a, b) => (Date.parse(b.lastPlayed ?? "") || 0) - (Date.parse(a.lastPlayed ?? "") || 0));
+      break;
+    default:
+      break;
+  }
+  return sorted;
+}
+async function browseCatalogRequest(input: CatalogBrowseRequest): Promise<CatalogBrowseResult> {
+  const token = await authStore.resolveJwtToken(input.token);
+  const allGames = await fetchCatalog("MAIN", token, input.providerStreamingBaseUrl);
+  const filterGroups = buildAndroidCatalogFilterGroups(allGames);
+  const validFilterIds = new Set(filterGroups.flatMap((group) => group.options.map((option) => option.id)));
+  const selectedFilterIds = (input.filterIds ?? []).filter((filterId) => validFilterIds.has(filterId));
+  const selectedSortId = ANDROID_CATALOG_SORT_OPTIONS.some((option) => option.id === input.sortId)
+    ? (input.sortId as string)
+    : "relevance";
+  const normalizedQuery = input.searchQuery?.trim().toLowerCase() ?? "";
+  const searchedGames = normalizedQuery
+    ? allGames.filter((game) => catalogSearchText(game).includes(normalizedQuery))
+    : allGames;
+  const filteredGames = selectedFilterIds.length > 0
+    ? searchedGames.filter((game) => selectedFilterIds.every((filterId) => gameMatchesCatalogFilter(game, filterId)))
+    : searchedGames;
+  const sortedGames = sortAndroidCatalogGames(filteredGames, selectedSortId);
+  return {
+    games: sortedGames,
+    numberReturned: sortedGames.length,
+    numberSupported: sortedGames.length,
+    totalCount: filteredGames.length,
+    hasNextPage: false,
+    searchQuery: input.searchQuery ?? "",
+    selectedSortId,
+    selectedFilterIds,
+    filterGroups,
+    sortOptions: ANDROID_CATALOG_SORT_OPTIONS,
+  };
+}
+async function fetchPrintedWasteQueueRequest(): Promise<PrintedWasteQueueData> {
+  const body = await httpRequest<unknown>(PRINTEDWASTE_QUEUE_URL, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": GFN_USER_AGENT,
+    },
+  });
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new Error("PrintedWaste API response was not an object");
+  }
+  const payload = body as { status?: unknown; data?: unknown };
+  if (payload.status !== true || !payload.data || typeof payload.data !== "object" || Array.isArray(payload.data)) {
+    throw new Error("PrintedWaste API returned invalid queue data");
+  }
+  const normalized: PrintedWasteQueueData = {};
+  for (const [zoneId, rawZone] of Object.entries(payload.data as Record<string, unknown>)) {
+    if (!rawZone || typeof rawZone !== "object" || Array.isArray(rawZone)) continue;
+    const zone = rawZone as Record<string, unknown>;
+    const queuePosition = zone.QueuePosition;
+    const lastUpdated = zone["Last Updated"];
+    const region = zone.Region;
+    const eta = zone.eta;
+    if (typeof queuePosition !== "number" || !Number.isFinite(queuePosition)) continue;
+    if (typeof lastUpdated !== "number" || !Number.isFinite(lastUpdated)) continue;
+    if (typeof region !== "string" || region.length === 0) continue;
+    if (eta !== undefined && (typeof eta !== "number" || !Number.isFinite(eta))) continue;
+    normalized[zoneId] = {
+      QueuePosition: queuePosition,
+      "Last Updated": lastUpdated,
+      Region: region,
+      ...(typeof eta === "number" ? { eta } : {}),
+    };
+  }
+  if (Object.keys(normalized).length === 0) {
+    throw new Error("PrintedWaste API returned no valid zones");
+  }
+  return normalized;
+}
+async function fetchPrintedWasteServerMappingRequest(): Promise<PrintedWasteServerMapping> {
+  const body = await httpRequest<unknown>(PRINTEDWASTE_SERVER_MAPPING_URL, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": GFN_USER_AGENT,
+    },
+  });
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new Error("PrintedWaste server mapping response was not an object");
+  }
+  const payload = body as { status?: unknown; data?: unknown };
+  if (payload.status !== true || !payload.data || typeof payload.data !== "object" || Array.isArray(payload.data)) {
+    throw new Error("PrintedWaste server mapping returned invalid data");
+  }
+  const normalized: PrintedWasteServerMapping = {};
+  for (const [zoneId, rawZone] of Object.entries(payload.data as Record<string, unknown>)) {
+    if (!rawZone || typeof rawZone !== "object" || Array.isArray(rawZone)) continue;
+    const zone = rawZone as Record<string, unknown>;
+    normalized[zoneId] = {
+      ...(typeof zone.title === "string" ? { title: zone.title } : {}),
+      ...(typeof zone.region === "string" ? { region: zone.region } : {}),
+      ...(typeof zone.is4080Server === "boolean" ? { is4080Server: zone.is4080Server } : {}),
+      ...(typeof zone.is5080Server === "boolean" ? { is5080Server: zone.is5080Server } : {}),
+      ...(typeof zone.nuked === "boolean" ? { nuked: zone.nuked } : {}),
+    };
+  }
+  return normalized;
+}
 async function resolveLaunchId(token: string, appIdOrUuid: string, providerStreamingBaseUrl?: string): Promise<string | null> { if (isNumericId(appIdOrUuid)) return appIdOrUuid; const vpcId = await getVpcId(token, providerStreamingBaseUrl); const payload = await fetchAppMetaData(token, [appIdOrUuid], vpcId); if (payload.errors?.length) throw new Error(payload.errors.map((error) => error.message).join(", ")); const app = payload.data?.apps?.items?.[0]; if (!app) return null; const selected = app.variants?.find((variant) => variant.gfn?.library?.selected === true); if (isNumericId(selected?.id)) return selected.id; const firstNumeric = app.variants?.find((variant) => isNumericId(variant.id)); if (firstNumeric) return firstNumeric.id; return isNumericId(app.id) ? app.id : null; }
 
 function requestHeaders(options: { token: string; clientId: string; deviceId: string; includeOrigin?: boolean; deviceMake?: string; deviceModel?: string }): Record<string, string> { const headers: Record<string, string> = { Authorization: `GFNJWT ${options.token}`, Accept: "application/json, text/plain, */*", "Content-Type": "application/json", "User-Agent": GFN_USER_AGENT, "nv-browser-type": "CHROME", "nv-client-id": options.clientId, "nv-client-streamer": "NVIDIA-CLASSIC", "nv-client-type": "NATIVE", "nv-client-version": GFN_CLIENT_VERSION, "nv-device-make": options.deviceMake ?? "UNKNOWN", "nv-device-model": options.deviceModel ?? "UNKNOWN", "nv-device-os": "ANDROID", "nv-device-type": "PHONE", "x-device-id": options.deviceId }; if (options.includeOrigin !== false) { headers.Origin = "https://play.geforcenow.com"; headers.Referer = "https://play.geforcenow.com/"; } return headers; }
@@ -400,6 +610,7 @@ const api: OpenNowApi = {
   fetchSubscription: async (input) => fetchSubscriptionInfo(input),
   fetchMainGames: async (input) => fetchCatalog("MAIN", await authStore.resolveJwtToken(input.token), input.providerStreamingBaseUrl),
   fetchLibraryGames: async (input) => fetchCatalog("LIBRARY", await authStore.resolveJwtToken(input.token), input.providerStreamingBaseUrl),
+  browseCatalog: async (input) => browseCatalogRequest(input),
   fetchPublicGames: async () => fetchPublicCatalog(),
   resolveLaunchAppId: async (input) => resolveLaunchId(await authStore.resolveJwtToken(input.token), input.appIdOrUuid, input.providerStreamingBaseUrl),
   createSession: async (input) => createSessionRequest(input),
@@ -417,6 +628,11 @@ const api: OpenNowApi = {
   onSignalingEvent: (listener) => { signalingListeners.add(listener); return () => signalingListeners.delete(listener); },
   onToggleFullscreen: () => () => undefined,
   quitApp: async () => unsupported("Quit app is not supported on Android."),
+  getUpdaterState: async (): Promise<AppUpdaterState> => DEFAULT_ANDROID_UPDATER_STATE,
+  checkForUpdates: async (): Promise<AppUpdaterState> => DEFAULT_ANDROID_UPDATER_STATE,
+  downloadUpdate: async (): Promise<AppUpdaterState> => DEFAULT_ANDROID_UPDATER_STATE,
+  installUpdateAndRestart: async (): Promise<AppUpdaterState> => DEFAULT_ANDROID_UPDATER_STATE,
+  onUpdaterStateChanged: () => () => undefined,
   toggleFullscreen: async () => { const next = document.body.dataset.androidFullscreen !== "true"; document.body.dataset.androidFullscreen = next ? "true" : "false"; if (next) { await StatusBar.hide().catch(() => undefined); } else { await StatusBar.show().catch(() => undefined); await StatusBar.setStyle({ style: Style.Dark }).catch(() => undefined); } },
   setFullscreen: async (value: boolean) => { document.body.dataset.androidFullscreen = value ? "true" : "false"; if (value) { await StatusBar.hide().catch(() => undefined); } else { await StatusBar.show().catch(() => undefined); await StatusBar.setStyle({ style: Style.Dark }).catch(() => undefined); } },
   togglePointerLock: async () => unsupported("Pointer lock is not supported on Android."),
@@ -442,6 +658,8 @@ const api: OpenNowApi = {
   getMediaThumbnail: async (input: { filePath: string }) => { if (input.filePath.startsWith(SCREENSHOT_DIR)) return readDataUrl(input.filePath, "image/png"); const recordings = await readRecordingMeta(); return recordings.find((entry) => entry.filePath === input.filePath)?.thumbnailDataUrl ?? null; },
   showMediaInFolder: async () => unsupported("Folder access is not supported on Android."),
   deleteCache: async () => unsupported("Cache deletion is not supported on Android in this pass."),
+  fetchPrintedWasteQueue: async (): Promise<PrintedWasteQueueData> => fetchPrintedWasteQueueRequest(),
+  fetchPrintedWasteServerMapping: async (): Promise<PrintedWasteServerMapping> => fetchPrintedWasteServerMappingRequest(),
   getThanksData: async (): Promise<ThankYouDataResult> => { const cached = await readPreferenceJson<ThankYouDataResult | null>(THANKS_CACHE_KEY, null); if (cached) return cached; const placeholder: ThankYouDataResult = { contributors: [], supporters: [], contributorsError: "Community data is unavailable on Android in this pass." }; await writePreferenceJson(THANKS_CACHE_KEY, placeholder); return placeholder; },
 };
 

@@ -6,6 +6,7 @@ const DEFAULT_STREAM_PREFERENCES = getDefaultStreamPreferences();
 export const DEFAULT_SETTINGS: Settings = {
   resolution: "1920x1080",
   aspectRatio: "16:9",
+  posterSizeScale: 1,
   fps: 60,
   maxBitrateMbps: 75,
   codec: DEFAULT_STREAM_PREFERENCES.codec,
@@ -18,6 +19,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mouseAcceleration: 1,
   shortcutToggleStats: "F3",
   shortcutTogglePointerLock: "F8",
+  shortcutToggleFullscreen: "F10",
   shortcutStopStream: "Ctrl+Shift+Q",
   shortcutToggleAntiAfk: "Ctrl+Shift+K",
   shortcutToggleMicrophone: "Ctrl+Shift+M",
@@ -26,6 +28,7 @@ export const DEFAULT_SETTINGS: Settings = {
   microphoneMode: "disabled",
   microphoneDeviceId: "",
   hideStreamButtons: false,
+  showAntiAfkIndicator: true,
   showStatsOnLaunch: false,
   controllerMode: false,
   controllerUiSounds: false,
@@ -41,4 +44,7 @@ export const DEFAULT_SETTINGS: Settings = {
   keyboardLayout: DEFAULT_KEYBOARD_LAYOUT,
   gameLanguage: "en_US",
   enableL4S: false,
+  enableCloudGsync: false,
+  discordRichPresence: false,
+  autoCheckForUpdates: true,
 };
