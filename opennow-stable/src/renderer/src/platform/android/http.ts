@@ -6,10 +6,24 @@ function normalizeHeaders(headers?: Record<string, string>): Record<string, stri
   );
 }
 
+function formatResponseBody(data: HttpResponse["data"]): string {
+  if (typeof data === "string") {
+    return data;
+  }
+  if (data == null) {
+    return "";
+  }
+  try {
+    return JSON.stringify(data);
+  } catch {
+    return String(data);
+  }
+}
+
 async function parseResponse<T>(response: HttpResponse, responseType: "json" | "text"): Promise<T> {
   if (response.status < 200 || response.status >= 300) {
-    const body = typeof response.data === "string" ? response.data : JSON.stringify(response.data);
-    throw new Error(`HTTP ${response.status}: ${body.slice(0, 400)}`);
+    const body = formatResponseBody(response.data);
+    throw new Error(`HTTP ${response.status}: ${(body || "<empty body>").slice(0, 400)}`);
   }
 
   if (responseType === "text") {

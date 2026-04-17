@@ -487,6 +487,7 @@ export class GfnWebRtcClient {
   private autoPointerLockInProgress = false;
   // Timer for synthetic Escape on pointer lock loss
   private pointerLockEscapeTimer: number | null = null;
+  private relayFallbackTimer: number | null = null;
   // Fallback keyup if browser swallows Escape keyup while keyboard lock is active.
   private escapeAutoKeyUpTimer: number | null = null;
   // True when we already sent an immediate Escape tap for the current physical hold.
@@ -905,6 +906,10 @@ export class GfnWebRtcClient {
     if (this.gamepadPollTimer !== null) {
       window.clearTimeout(this.gamepadPollTimer);
       this.gamepadPollTimer = null;
+    }
+    if (this.relayFallbackTimer !== null) {
+      window.clearTimeout(this.relayFallbackTimer);
+      this.relayFallbackTimer = null;
     }
   }
 
@@ -3800,6 +3805,9 @@ export class GfnWebRtcClient {
           fps: settings.fps,
           maxBitrateKbps: settings.maxBitrateKbps,
           partialReliableThresholdMs: this.partialReliableThresholdMs,
+          hidDeviceMask: this.riInputCapabilities.hidDeviceMask,
+          enablePartiallyReliableTransferGamepad: this.riInputCapabilities.enablePartiallyReliableTransferGamepad,
+          enablePartiallyReliableTransferHid: this.riInputCapabilities.enablePartiallyReliableTransferHid,
           codec: effectiveCodec,
           colorQuality: settings.colorQuality,
           credentials: relayCredentials,
@@ -3849,9 +3857,14 @@ export class GfnWebRtcClient {
       }
     };
 
-    setTimeout(() => {
-      if (!triedRelay && this.pc && this.pc.connectionState !== "connected" && this.pc.iceConnectionState !== "connected") {
+    const fallbackPc = pc;
+    const fallbackSessionId = session.sessionId;
+    this.relayFallbackTimer = window.setTimeout(() => {
+      if (!triedRelay && this.pc === fallbackPc && session.sessionId === fallbackSessionId && this.pc.connectionState !== "connected" && this.pc.iceConnectionState !== "connected") {
         void attemptRelayFallback();
+      }
+      if (this.relayFallbackTimer !== null && this.pc === fallbackPc) {
+        this.relayFallbackTimer = null;
       }
     }, relayFallbackTimeoutMs);
   }

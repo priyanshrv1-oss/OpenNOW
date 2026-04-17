@@ -45,6 +45,12 @@ export class BrowserSignalingClient {
     resolve: () => void;
     reject: (error: Error) => void;
   } | null = null;
+  private currentSocketContext: {
+    ws: WebSocket;
+    generation: number;
+    explicitlyClosed: boolean;
+    disconnectedEmitted: boolean;
+  } | null = null;
 
   onEvent(listener: (event: MainToRendererSignalingEvent) => void): () => void {
     this.listeners.add(listener);
@@ -98,7 +104,7 @@ export class BrowserSignalingClient {
   async connect(input: SignalingConnectRequest): Promise<void> {
     if (this.ws?.readyState === WebSocket.OPEN) return;
     if (this.ws || this.pendingConnect) {
-      this.disconnect("Signaling connect replaced");
+      this.disconnect("Signaling connect replaced", false);
     }
     const url = this.buildSignInUrl(input);
     const protocol = `x-nv-sessionid.${input.sessionId}`;
@@ -108,6 +114,13 @@ export class BrowserSignalingClient {
       const ws = new WebSocket(url, protocol);
       this.ws = ws;
       this.pendingConnect = { ws, generation, settled: false, resolve, reject };
+      const socketContext = {
+        ws,
+        generation,
+        explicitlyClosed: false,
+        disconnectedEmitted: false,
+      };
+      this.currentSocketContext = socketContext;
 
       const isCurrent = (): boolean => this.ws === ws && this.generation === generation;
 
@@ -150,17 +163,23 @@ export class BrowserSignalingClient {
       };
 
       ws.onclose = (event) => {
-        if (this.ws === ws) {
+        if (this.currentSocketContext === socketContext) {
           this.clearHeartbeat();
+          this.currentSocketContext = null;
+        }
+        if (this.ws === ws) {
           this.ws = null;
         }
         const reason = event.reason || "socket closed";
-        if (isCurrent()) {
-          this.settlePendingConnect(ws, generation, new Error(reason));
+        this.settlePendingConnect(ws, generation, new Error(reason));
+        if (!socketContext.explicitlyClosed && !socketContext.disconnectedEmitted) {
+          socketContext.disconnectedEmitted = true;
           this.emit({ type: "disconnected", reason });
           return;
         }
-        this.settlePendingConnect(ws, generation, new Error(reason));
+        if (isCurrent()) {
+          return;
+        }
       };
     });
   }
@@ -267,8 +286,9 @@ export class BrowserSignalingClient {
     });
   }
 
-  disconnect(reason = "Signaling disconnected"): void {
+  disconnect(reason = "Signaling disconnected", emitEvent = true): void {
     const ws = this.ws;
+    const socketContext = this.currentSocketContext;
     this.generation += 1;
     this.clearHeartbeat();
     if (this.pendingConnect && !this.pendingConnect.settled) {
@@ -278,9 +298,16 @@ export class BrowserSignalingClient {
       pending.reject(new Error(reason));
     }
     this.ws = null;
+    this.currentSocketContext = null;
+    if (socketContext) {
+      socketContext.explicitlyClosed = true;
+      if (emitEvent && !socketContext.disconnectedEmitted) {
+        socketContext.disconnectedEmitted = true;
+        this.emit({ type: "disconnected", reason });
+      }
+    }
     if (ws) {
       ws.close();
-      this.emit({ type: "disconnected", reason });
     }
   }
 }

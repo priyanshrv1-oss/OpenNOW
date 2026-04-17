@@ -11,7 +11,7 @@ def versionParts = packageVersionName.tokenize('.').collect { token ->
 while (versionParts.size() < 3) {
     versionParts << 0
 }
-def packageVersionCode = (versionParts[0] * 10000) + (versionParts[1] * 100) + versionParts[2]
+def packageVersionCode = (versionParts[0] * 100000000) + (versionParts[1] * 10000) + versionParts[2]
 
 android {
     namespace = "com.opencloudgaming.opennow"

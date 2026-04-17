@@ -824,6 +824,7 @@ export interface ScreenshotEntry {
   createdAtMs: number;
   sizeBytes: number;
   dataUrl: string;
+  gameTitle?: string;
 }
 
 export interface RecordingEntry {

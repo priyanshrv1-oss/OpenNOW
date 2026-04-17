@@ -2132,209 +2132,210 @@ export function SettingsPage({ settings, regions, onSettingChange, codecResults,
                   <span className="settings-subtle-hint">Dynamic turn boost strength (1% = off-like, 150% = strongest).</span>
                 </div>
 
-                {/* Shortcuts */}
-                <div className="settings-row settings-row--column">
-                  <div className="settings-row-top">
-                    <label className="settings-label">Shortcuts</label>
-                    <div className="settings-shortcut-actions">
-                      <span className="settings-value-badge">Editable</span>
-                      <button
-                        type="button"
-                        className="settings-shortcut-reset-btn"
-                        onClick={handleResetShortcuts}
-                        disabled={areShortcutsDefault}
-                      >
-                        Reset to defaults
-                      </button>
+                {platformCapabilities.supportsKeyboardShortcuts && (
+                  <div className="settings-row settings-row--column">
+                    <div className="settings-row-top">
+                      <label className="settings-label">Shortcuts</label>
+                      <div className="settings-shortcut-actions">
+                        <span className="settings-value-badge">Editable</span>
+                        <button
+                          type="button"
+                          className="settings-shortcut-reset-btn"
+                          onClick={handleResetShortcuts}
+                          disabled={areShortcutsDefault}
+                        >
+                          Reset to defaults
+                        </button>
+                      </div>
                     </div>
+
+                    <div className="settings-shortcut-grid">
+                      <div className="settings-shortcut-row">
+                        <span className="settings-shortcut-label" id="shortcut-toggle-stats-label">Toggle Stats</span>
+                        <input
+                          type="text"
+                          id="shortcut-toggle-stats"
+                          aria-labelledby="shortcut-toggle-stats-label"
+                          readOnly
+                          className={`settings-text-input settings-shortcut-input ${toggleStatsError ? "error" : ""}`}
+                          value={toggleStatsInput}
+                          onFocus={(e) => e.target.select()}
+                          onBlur={() => handleShortcutBlur("shortcutToggleStats", toggleStatsInput)}
+                          onPaste={(e) => handleShortcutPaste("shortcutToggleStats", e)}
+                          onKeyDown={(e) => handleShortcutCaptureKeyDown("shortcutToggleStats", e)}
+                          placeholder="Click here, then press a key"
+                          title="Focus and press the key combination to bind"
+                          spellCheck={false}
+                        />
+                      </div>
+
+                      <div className="settings-shortcut-row">
+                        <span className="settings-shortcut-label" id="shortcut-pointer-lock-label">Mouse Lock</span>
+                        <input
+                          type="text"
+                          id="shortcut-pointer-lock"
+                          aria-labelledby="shortcut-pointer-lock-label"
+                          readOnly
+                          className={`settings-text-input settings-shortcut-input ${togglePointerLockError ? "error" : ""}`}
+                          value={togglePointerLockInput}
+                          onFocus={(e) => e.target.select()}
+                          onBlur={() => handleShortcutBlur("shortcutTogglePointerLock", togglePointerLockInput)}
+                          onPaste={(e) => handleShortcutPaste("shortcutTogglePointerLock", e)}
+                          onKeyDown={(e) => handleShortcutCaptureKeyDown("shortcutTogglePointerLock", e)}
+                          placeholder="Click here, then press a key"
+                          title="Focus and press the key combination to bind"
+                          spellCheck={false}
+                        />
+                      </div>
+
+                      <div className="settings-shortcut-row">
+                        <span className="settings-shortcut-label" id="shortcut-fullscreen-label">Toggle Full Screen</span>
+                        <input
+                          type="text"
+                          id="shortcut-fullscreen"
+                          aria-labelledby="shortcut-fullscreen-label"
+                          readOnly
+                          className={`settings-text-input settings-shortcut-input ${toggleFullscreenError ? "error" : ""}`}
+                          value={toggleFullscreenInput}
+                          onFocus={(e) => e.target.select()}
+                          onBlur={() => handleShortcutBlur("shortcutToggleFullscreen", toggleFullscreenInput)}
+                          onPaste={(e) => handleShortcutPaste("shortcutToggleFullscreen", e)}
+                          onKeyDown={(e) => handleShortcutCaptureKeyDown("shortcutToggleFullscreen", e)}
+                          placeholder="Click here, then press a key"
+                          title="Focus and press the key combination to bind"
+                          spellCheck={false}
+                        />
+                      </div>
+
+                      <div className="settings-shortcut-row">
+                        <span className="settings-shortcut-label" id="shortcut-stop-stream-label">Stop Stream</span>
+                        <input
+                          type="text"
+                          id="shortcut-stop-stream"
+                          aria-labelledby="shortcut-stop-stream-label"
+                          readOnly
+                          className={`settings-text-input settings-shortcut-input ${stopStreamError ? "error" : ""}`}
+                          value={stopStreamInput}
+                          onFocus={(e) => e.target.select()}
+                          onBlur={() => handleShortcutBlur("shortcutStopStream", stopStreamInput)}
+                          onPaste={(e) => handleShortcutPaste("shortcutStopStream", e)}
+                          onKeyDown={(e) => handleShortcutCaptureKeyDown("shortcutStopStream", e)}
+                          placeholder="Click here, then press a key"
+                          title="Focus and press the key combination to bind"
+                          spellCheck={false}
+                        />
+                      </div>
+
+                      <div className="settings-shortcut-row">
+                        <span className="settings-shortcut-label" id="shortcut-anti-afk-label">Toggle Anti-AFK</span>
+                        <input
+                          type="text"
+                          id="shortcut-anti-afk"
+                          aria-labelledby="shortcut-anti-afk-label"
+                          readOnly
+                          className={`settings-text-input settings-shortcut-input ${toggleAntiAfkError ? "error" : ""}`}
+                          value={toggleAntiAfkInput}
+                          onFocus={(e) => e.target.select()}
+                          onBlur={() => handleShortcutBlur("shortcutToggleAntiAfk", toggleAntiAfkInput)}
+                          onPaste={(e) => handleShortcutPaste("shortcutToggleAntiAfk", e)}
+                          onKeyDown={(e) => handleShortcutCaptureKeyDown("shortcutToggleAntiAfk", e)}
+                          placeholder="Click here, then press a key"
+                          title="Focus and press the key combination to bind"
+                          spellCheck={false}
+                        />
+                      </div>
+
+                      <div className="settings-shortcut-row">
+                        <span className="settings-shortcut-label" id="shortcut-mic-label">Toggle Microphone</span>
+                        <input
+                          type="text"
+                          id="shortcut-mic"
+                          aria-labelledby="shortcut-mic-label"
+                          readOnly
+                          className={`settings-text-input settings-shortcut-input ${toggleMicrophoneError ? "error" : ""}`}
+                          value={toggleMicrophoneInput}
+                          onFocus={(e) => e.target.select()}
+                          onBlur={() => handleShortcutBlur("shortcutToggleMicrophone", toggleMicrophoneInput)}
+                          onPaste={(e) => handleShortcutPaste("shortcutToggleMicrophone", e)}
+                          onKeyDown={(e) => handleShortcutCaptureKeyDown("shortcutToggleMicrophone", e)}
+                          placeholder="Click here, then press a key"
+                          title="Focus and press the key combination to bind"
+                          spellCheck={false}
+                        />
+                      </div>
+
+                      <div className="settings-shortcut-row">
+                        <span className="settings-shortcut-label" id="shortcut-screenshot-label">Screenshot</span>
+                        <input
+                          type="text"
+                          id="shortcut-screenshot"
+                          aria-labelledby="shortcut-screenshot-label"
+                          readOnly
+                          className={`settings-text-input settings-shortcut-input ${screenshotError ? "error" : ""}`}
+                          value={screenshotInput}
+                          onFocus={(e) => e.target.select()}
+                          onBlur={() => handleShortcutBlur("shortcutScreenshot", screenshotInput)}
+                          onPaste={(e) => handleShortcutPaste("shortcutScreenshot", e)}
+                          onKeyDown={(e) => handleShortcutCaptureKeyDown("shortcutScreenshot", e)}
+                          placeholder="Click here, then press a key"
+                          title="Focus and press the key combination to bind"
+                          spellCheck={false}
+                        />
+                      </div>
+
+                      <div className="settings-shortcut-row">
+                        <span className="settings-shortcut-label" id="shortcut-recording-label">Recording</span>
+                        <input
+                          type="text"
+                          id="shortcut-recording"
+                          aria-labelledby="shortcut-recording-label"
+                          readOnly
+                          className={`settings-text-input settings-shortcut-input ${recordingError ? "error" : ""}`}
+                          value={recordingInput}
+                          onFocus={(e) => e.target.select()}
+                          onBlur={() => handleShortcutBlur("shortcutToggleRecording", recordingInput)}
+                          onPaste={(e) => handleShortcutPaste("shortcutToggleRecording", e)}
+                          onKeyDown={(e) => handleShortcutCaptureKeyDown("shortcutToggleRecording", e)}
+                          placeholder="Click here, then press a key"
+                          title="Focus and press the key combination to bind"
+                          spellCheck={false}
+                        />
+                      </div>
+
+                      <div className="settings-shortcut-row">
+                        <span className="settings-shortcut-label" id="shortcut-sidebar-label">Toggle stream sidebar</span>
+                        <input
+                          type="text"
+                          id="shortcut-sidebar"
+                          aria-labelledby="shortcut-sidebar-label"
+                          value={formatShortcutForDisplay(SIDEBAR_TOGGLE_SHORTCUT_RAW, isMac)}
+                          className="settings-text-input settings-shortcut-input settings-shortcut-input--static"
+                          readOnly
+                          tabIndex={-1}
+                        />
+                      </div>
+                    </div>
+
+                    {(toggleStatsError || togglePointerLockError || toggleFullscreenError || stopStreamError || toggleAntiAfkError || toggleMicrophoneError || screenshotError || recordingError) && (
+                      <span className="settings-input-hint">
+                        {toggleStatsError
+                          || togglePointerLockError
+                          || toggleFullscreenError
+                          || stopStreamError
+                          || toggleAntiAfkError
+                          || toggleMicrophoneError
+                          || screenshotError
+                          || recordingError}
+                      </span>
+                    )}
+
+                    {!toggleStatsError && !togglePointerLockError && !toggleFullscreenError && !stopStreamError && !toggleAntiAfkError && !toggleMicrophoneError && !screenshotError && !recordingError && (
+                      <span className="settings-shortcut-hint">
+                        Click a field and press the keys to bind, or paste a shortcut ({shortcutExamples}). Escape cancels focus. Full screen: {formatShortcutForDisplay(settings.shortcutToggleFullscreen, isMac)}. Stop: {formatShortcutForDisplay(settings.shortcutStopStream, isMac)}. Mic: {formatShortcutForDisplay(settings.shortcutToggleMicrophone, isMac)}. Screenshot: {formatShortcutForDisplay(settings.shortcutScreenshot, isMac)}. Recording: {formatShortcutForDisplay(settings.shortcutToggleRecording, isMac)}.
+                      </span>
+                    )}
                   </div>
-
-                  <div className="settings-shortcut-grid">
-                <div className="settings-shortcut-row">
-                  <span className="settings-shortcut-label" id="shortcut-toggle-stats-label">Toggle Stats</span>
-                  <input
-                    type="text"
-                    id="shortcut-toggle-stats"
-                    aria-labelledby="shortcut-toggle-stats-label"
-                    readOnly
-                    className={`settings-text-input settings-shortcut-input ${toggleStatsError ? "error" : ""}`}
-                    value={toggleStatsInput}
-                    onFocus={(e) => e.target.select()}
-                    onBlur={() => handleShortcutBlur("shortcutToggleStats", toggleStatsInput)}
-                    onPaste={(e) => handleShortcutPaste("shortcutToggleStats", e)}
-                    onKeyDown={(e) => handleShortcutCaptureKeyDown("shortcutToggleStats", e)}
-                    placeholder="Click here, then press a key"
-                    title="Focus and press the key combination to bind"
-                    spellCheck={false}
-                  />
-                </div>
-
-                <div className="settings-shortcut-row">
-                  <span className="settings-shortcut-label" id="shortcut-pointer-lock-label">Mouse Lock</span>
-                  <input
-                    type="text"
-                    id="shortcut-pointer-lock"
-                    aria-labelledby="shortcut-pointer-lock-label"
-                    readOnly
-                    className={`settings-text-input settings-shortcut-input ${togglePointerLockError ? "error" : ""}`}
-                    value={togglePointerLockInput}
-                    onFocus={(e) => e.target.select()}
-                    onBlur={() => handleShortcutBlur("shortcutTogglePointerLock", togglePointerLockInput)}
-                    onPaste={(e) => handleShortcutPaste("shortcutTogglePointerLock", e)}
-                    onKeyDown={(e) => handleShortcutCaptureKeyDown("shortcutTogglePointerLock", e)}
-                    placeholder="Click here, then press a key"
-                    title="Focus and press the key combination to bind"
-                    spellCheck={false}
-                  />
-                </div>
-
-                <div className="settings-shortcut-row">
-                  <span className="settings-shortcut-label" id="shortcut-fullscreen-label">Toggle Full Screen</span>
-                  <input
-                    type="text"
-                    id="shortcut-fullscreen"
-                    aria-labelledby="shortcut-fullscreen-label"
-                    readOnly
-                    className={`settings-text-input settings-shortcut-input ${toggleFullscreenError ? "error" : ""}`}
-                    value={toggleFullscreenInput}
-                    onFocus={(e) => e.target.select()}
-                    onBlur={() => handleShortcutBlur("shortcutToggleFullscreen", toggleFullscreenInput)}
-                    onPaste={(e) => handleShortcutPaste("shortcutToggleFullscreen", e)}
-                    onKeyDown={(e) => handleShortcutCaptureKeyDown("shortcutToggleFullscreen", e)}
-                    placeholder="Click here, then press a key"
-                    title="Focus and press the key combination to bind"
-                    spellCheck={false}
-                  />
-                </div>
-
-                <div className="settings-shortcut-row">
-                  <span className="settings-shortcut-label" id="shortcut-stop-stream-label">Stop Stream</span>
-                  <input
-                    type="text"
-                    id="shortcut-stop-stream"
-                    aria-labelledby="shortcut-stop-stream-label"
-                    readOnly
-                    className={`settings-text-input settings-shortcut-input ${stopStreamError ? "error" : ""}`}
-                    value={stopStreamInput}
-                    onFocus={(e) => e.target.select()}
-                    onBlur={() => handleShortcutBlur("shortcutStopStream", stopStreamInput)}
-                    onPaste={(e) => handleShortcutPaste("shortcutStopStream", e)}
-                    onKeyDown={(e) => handleShortcutCaptureKeyDown("shortcutStopStream", e)}
-                    placeholder="Click here, then press a key"
-                    title="Focus and press the key combination to bind"
-                    spellCheck={false}
-                  />
-                </div>
-
-                <div className="settings-shortcut-row">
-                  <span className="settings-shortcut-label" id="shortcut-anti-afk-label">Toggle Anti-AFK</span>
-                  <input
-                    type="text"
-                    id="shortcut-anti-afk"
-                    aria-labelledby="shortcut-anti-afk-label"
-                    readOnly
-                    className={`settings-text-input settings-shortcut-input ${toggleAntiAfkError ? "error" : ""}`}
-                    value={toggleAntiAfkInput}
-                    onFocus={(e) => e.target.select()}
-                    onBlur={() => handleShortcutBlur("shortcutToggleAntiAfk", toggleAntiAfkInput)}
-                    onPaste={(e) => handleShortcutPaste("shortcutToggleAntiAfk", e)}
-                    onKeyDown={(e) => handleShortcutCaptureKeyDown("shortcutToggleAntiAfk", e)}
-                    placeholder="Click here, then press a key"
-                    title="Focus and press the key combination to bind"
-                    spellCheck={false}
-                  />
-                </div>
-
-                <div className="settings-shortcut-row">
-                  <span className="settings-shortcut-label" id="shortcut-mic-label">Toggle Microphone</span>
-                  <input
-                    type="text"
-                    id="shortcut-mic"
-                    aria-labelledby="shortcut-mic-label"
-                    readOnly
-                    className={`settings-text-input settings-shortcut-input ${toggleMicrophoneError ? "error" : ""}`}
-                    value={toggleMicrophoneInput}
-                    onFocus={(e) => e.target.select()}
-                    onBlur={() => handleShortcutBlur("shortcutToggleMicrophone", toggleMicrophoneInput)}
-                    onPaste={(e) => handleShortcutPaste("shortcutToggleMicrophone", e)}
-                    onKeyDown={(e) => handleShortcutCaptureKeyDown("shortcutToggleMicrophone", e)}
-                    placeholder="Click here, then press a key"
-                    title="Focus and press the key combination to bind"
-                    spellCheck={false}
-                  />
-                </div>
-
-                <div className="settings-shortcut-row">
-                  <span className="settings-shortcut-label" id="shortcut-screenshot-label">Screenshot</span>
-                  <input
-                    type="text"
-                    id="shortcut-screenshot"
-                    aria-labelledby="shortcut-screenshot-label"
-                    readOnly
-                    className={`settings-text-input settings-shortcut-input ${screenshotError ? "error" : ""}`}
-                    value={screenshotInput}
-                    onFocus={(e) => e.target.select()}
-                    onBlur={() => handleShortcutBlur("shortcutScreenshot", screenshotInput)}
-                    onPaste={(e) => handleShortcutPaste("shortcutScreenshot", e)}
-                    onKeyDown={(e) => handleShortcutCaptureKeyDown("shortcutScreenshot", e)}
-                    placeholder="Click here, then press a key"
-                    title="Focus and press the key combination to bind"
-                    spellCheck={false}
-                  />
-                </div>
-
-                <div className="settings-shortcut-row">
-                  <span className="settings-shortcut-label" id="shortcut-recording-label">Recording</span>
-                  <input
-                    type="text"
-                    id="shortcut-recording"
-                    aria-labelledby="shortcut-recording-label"
-                    readOnly
-                    className={`settings-text-input settings-shortcut-input ${recordingError ? "error" : ""}`}
-                    value={recordingInput}
-                    onFocus={(e) => e.target.select()}
-                    onBlur={() => handleShortcutBlur("shortcutToggleRecording", recordingInput)}
-                    onPaste={(e) => handleShortcutPaste("shortcutToggleRecording", e)}
-                    onKeyDown={(e) => handleShortcutCaptureKeyDown("shortcutToggleRecording", e)}
-                    placeholder="Click here, then press a key"
-                    title="Focus and press the key combination to bind"
-                    spellCheck={false}
-                  />
-                </div>
-
-                <div className="settings-shortcut-row">
-                  <span className="settings-shortcut-label" id="shortcut-sidebar-label">Toggle stream sidebar</span>
-                  <input
-                    type="text"
-                    id="shortcut-sidebar"
-                    aria-labelledby="shortcut-sidebar-label"
-                    value={formatShortcutForDisplay(SIDEBAR_TOGGLE_SHORTCUT_RAW, isMac)}
-                    className="settings-text-input settings-shortcut-input settings-shortcut-input--static"
-                    readOnly
-                    tabIndex={-1}
-                  />
-                </div>
-              </div>
-
-              {(toggleStatsError || togglePointerLockError || toggleFullscreenError || stopStreamError || toggleAntiAfkError || toggleMicrophoneError || screenshotError || recordingError) && (
-                <span className="settings-input-hint">
-                  {toggleStatsError
-                    || togglePointerLockError
-                    || toggleFullscreenError
-                    || stopStreamError
-                    || toggleAntiAfkError
-                    || toggleMicrophoneError
-                    || screenshotError
-                    || recordingError}
-                </span>
-              )}
-
-              {!toggleStatsError && !togglePointerLockError && !toggleFullscreenError && !stopStreamError && !toggleAntiAfkError && !toggleMicrophoneError && !screenshotError && !recordingError && (
-                <span className="settings-shortcut-hint">
-                  Click a field and press the keys to bind, or paste a shortcut ({shortcutExamples}). Escape cancels focus. Full screen: {formatShortcutForDisplay(settings.shortcutToggleFullscreen, isMac)}. Stop: {formatShortcutForDisplay(settings.shortcutStopStream, isMac)}. Mic: {formatShortcutForDisplay(settings.shortcutToggleMicrophone, isMac)}. Screenshot: {formatShortcutForDisplay(settings.shortcutScreenshot, isMac)}. Recording: {formatShortcutForDisplay(settings.shortcutToggleRecording, isMac)}.
-                </span>
-              )}
-                </div>
+                )}
               </div>
             </section>
         )}

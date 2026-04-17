@@ -410,11 +410,11 @@ export function ControllerLibraryPage({
     }
 
     let cancelled = false;
-    const loadMedia = async () => {
-      try {
-        setMediaLoading(true);
-        setMediaError(null);
-        const listing = await openNow.listMediaByGame({});
+        const loadMedia = async () => {
+          try {
+            setMediaLoading(true);
+            setMediaError(null);
+            const listing = await openNow.listMediaByGame({});
         if (cancelled) return;
 
         const videos = [...(listing.videos ?? [])].sort((a, b) => b.createdAtMs - a.createdAtMs);

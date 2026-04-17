@@ -1406,6 +1406,15 @@ export function StreamView({
   }, [onReleasePointerLock]);
 
   useEffect(() => {
+    if (!platformCapabilities.supportsKeyboardShortcuts && activeSidebarTab === "shortcuts") {
+      setActiveSidebarTab("preferences");
+    }
+  }, [activeSidebarTab]);
+
+  useEffect(() => {
+    if (!platformCapabilities.supportsKeyboardShortcuts) {
+      return;
+    }
     const screenshotShortcut = normalizeShortcut(shortcuts.screenshot);
     const recordingShortcut = normalizeShortcut(shortcuts.recording);
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1493,15 +1502,17 @@ export function StreamView({
               >
                 Preferences
               </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeSidebarTab === "shortcuts"}
-                className={`sidebar-tab${activeSidebarTab === "shortcuts" ? " sidebar-tab--active" : ""}`}
-                onClick={() => setActiveSidebarTab("shortcuts")}
-              >
-                Shortcuts
-              </button>
+              {platformCapabilities.supportsKeyboardShortcuts && (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeSidebarTab === "shortcuts"}
+                  className={`sidebar-tab${activeSidebarTab === "shortcuts" ? " sidebar-tab--active" : ""}`}
+                  onClick={() => setActiveSidebarTab("shortcuts")}
+                >
+                  Shortcuts
+                </button>
+              )}
             </div>
 
             {activeSidebarTab === "preferences" && (
@@ -1603,7 +1614,7 @@ export function StreamView({
                 <section className="sidebar-section">
                   <div className="sidebar-section-header">
                     <span>Gallery</span>
-                    <span className="sidebar-section-sub">ScreensShot key: {shortcuts.screenshot}</span>
+                    <span className="sidebar-section-sub">{platformCapabilities.supportsKeyboardShortcuts ? `ScreensShot key: ${shortcuts.screenshot}` : "Capture screenshots from the sidebar"}</span>
                   </div>
                   <div className="sidebar-row sidebar-row--aligned">
                     <span className="sidebar-label">ScreensShot</span>
@@ -1651,7 +1662,7 @@ export function StreamView({
                     </button>
                   </div>
                   {screenshots.length === 0 && (
-                    <span className="sidebar-hint">No screenshots yet. Press {shortcuts.screenshot} to capture one.</span>
+                    <span className="sidebar-hint">{platformCapabilities.supportsKeyboardShortcuts ? `No screenshots yet. Press ${shortcuts.screenshot} to capture one.` : "No screenshots yet. Use Capture to save one."}</span>
                   )}
                   {galleryError && <span className="sidebar-hint sidebar-hint--error">{galleryError}</span>}
                 </section>
@@ -1659,7 +1670,7 @@ export function StreamView({
                 <section className="sidebar-section">
                   <div className="sidebar-section-header">
                     <span>Recordings</span>
-                    <span className="sidebar-section-sub">Record key: {shortcuts.recording}</span>
+                    <span className="sidebar-section-sub">{platformCapabilities.supportsKeyboardShortcuts ? `Record key: ${shortcuts.recording}` : "Start or stop recording from the sidebar"}</span>
                   </div>
                   {usedMimeType && (
                     <span className="sidebar-hint sidebar-hint--codec">Codec: {usedMimeType}</span>
@@ -1682,7 +1693,7 @@ export function StreamView({
                     <span className="sidebar-hint sidebar-hint--error">{recordingError}</span>
                   )}
                   {recordings.length === 0 ? (
-                    <span className="sidebar-hint">No recordings yet. Press {shortcuts.recording} to record.</span>
+                    <span className="sidebar-hint">{platformCapabilities.supportsKeyboardShortcuts ? `No recordings yet. Press ${shortcuts.recording} to record.` : "No recordings yet. Use Start to record."}</span>
                   ) : (
                     <div className="sidebar-gallery-row">
                       <button
@@ -1751,7 +1762,7 @@ export function StreamView({
               </>
             )}
 
-            {activeSidebarTab === "shortcuts" && (
+            {platformCapabilities.supportsKeyboardShortcuts && activeSidebarTab === "shortcuts" && (
               <>
                 <div className="sidebar-separator" aria-hidden="true" />
                 <section className="sidebar-section">
@@ -2084,7 +2095,7 @@ export function StreamView({
       )}
 
       {/* Keyboard hints */}
-      {showHints && !isConnecting && (
+      {showHints && !isConnecting && platformCapabilities.supportsKeyboardShortcuts && (
         <div className="sv-hints">
           <div className="sv-hint"><kbd>{shortcuts.toggleStats}</kbd><span>Stats</span></div>
           <div className="sv-hint"><kbd>{shortcuts.togglePointerLock}</kbd><span>Mouse lock</span></div>

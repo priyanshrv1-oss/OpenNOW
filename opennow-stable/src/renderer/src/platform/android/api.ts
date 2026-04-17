@@ -86,11 +86,12 @@ import { DEFAULT_SETTINGS } from "@shared/settings";
 import type { OpenNowPlatform } from "../types";
 import { BrowserSignalingClient } from "./browserSignaling";
 import { nativeRequest } from "./http";
-import { clearDirectory, deleteFile, ensureDir, getPreferenceJson, readDir, readFileBase64, removePreference, setPreferenceJson } from "./storage";
+import { appendFile, clearDirectory, deleteFile, ensureDir, getPreferenceJson, readDir, readFileBase64, removePreference, setPreferenceJson, writeFile } from "./storage";
 
 const AUTH_STATE_KEY = "opennow.android.auth-state.v1";
 const SETTINGS_KEY = "opennow.android.settings.v1";
 const RECORDINGS_KEY = "opennow.android.recordings.v1";
+const SCREENSHOTS_KEY = "opennow.android.screenshots.v1";
 const SCREENSHOT_DIR = "opennow-media/screenshots";
 const RECORDING_DIR = "opennow-media/recordings";
 const PUBLIC_GAMES_URL = "https://static.nvidiagrid.net/supported-public-game-list/locales/gfnpc-en-US.json";
@@ -593,15 +594,19 @@ function encodeBase64(bytes: Uint8Array): string { let binary = ""; const chunkS
 async function ensureDirectory(path: string): Promise<void> { await ensureDir(path, { relativeToBaseDir: false }); }
 async function listDirectory(path: string): Promise<Array<{ name: string }>> { return (await readDir(path, { relativeToBaseDir: false })).map((name) => ({ name })); }
 type RecordingMeta = RecordingEntry;
+type ScreenshotMeta = Omit<ScreenshotEntry, "dataUrl">;
 interface RecordingDraft { id: string; fileName: string; filePath: string; pendingWrite: Promise<void>; }
 const RECORDING_META_KEY = RECORDINGS_KEY;
 const THANKS_CACHE_KEY = "opennow.android.thanks.v1";
 async function readRecordingMeta(): Promise<RecordingMeta[]> { return readPreferenceJson<RecordingMeta[]>(RECORDING_META_KEY, []); }
 async function writeRecordingMeta(entries: RecordingMeta[]): Promise<void> { await writePreferenceJson(RECORDING_META_KEY, entries); }
+async function readScreenshotMeta(): Promise<ScreenshotMeta[]> { return readPreferenceJson<ScreenshotMeta[]>(SCREENSHOTS_KEY, []); }
+async function writeScreenshotMeta(entries: ScreenshotMeta[]): Promise<void> { await writePreferenceJson(SCREENSHOTS_KEY, entries); }
 async function readDataUrl(path: string, mimeType: string): Promise<string> { return `data:${mimeType};base64,${await readFileBase64(path, { relativeToBaseDir: false })}`; }
 function recordingExtension(mimeType: string): "mp4" | "webm" { return mimeType.includes("mp4") ? "mp4" : "webm"; }
-async function createRecordingDraft(recordingId: string, mimeType: string): Promise<RecordingDraft> { await ensureDirectory(RECORDING_DIR); const fileName = `${Date.now()}-${recordingId}.${recordingExtension(mimeType)}`; const filePath = `${RECORDING_DIR}/${fileName}`; await Filesystem.writeFile({ path: filePath, directory: Directory.Data, data: "", recursive: true }); return { id: recordingId, fileName, filePath, pendingWrite: Promise.resolve() }; }
-function enqueueRecordingWrite(state: RecordingDraft, chunk: ArrayBuffer): Promise<void> { state.pendingWrite = state.pendingWrite.then(async () => { await Filesystem.appendFile({ path: state.filePath, directory: Directory.Data, data: encodeBase64(new Uint8Array(chunk.slice(0))) }); }); return state.pendingWrite; }
+function screenshotMimeType(fileName: string): string { if (fileName.endsWith(".jpg")) return "image/jpeg"; if (fileName.endsWith(".webp")) return "image/webp"; return "image/png"; }
+async function createRecordingDraft(recordingId: string, mimeType: string): Promise<RecordingDraft> { await ensureDirectory(RECORDING_DIR); const fileName = `${Date.now()}-${recordingId}.${recordingExtension(mimeType)}`; const filePath = `${RECORDING_DIR}/${fileName}`; await writeFile(filePath, "", { relativeToBaseDir: false }); return { id: recordingId, fileName, filePath, pendingWrite: Promise.resolve() }; }
+function enqueueRecordingWrite(state: RecordingDraft, chunk: ArrayBuffer): Promise<void> { state.pendingWrite = state.pendingWrite.then(async () => { await appendFile(state.filePath, encodeBase64(new Uint8Array(chunk.slice(0))), { relativeToBaseDir: false }); }); return state.pendingWrite; }
 async function cleanupRecordingDraft(state: RecordingDraft): Promise<void> { await state.pendingWrite.catch(() => undefined); await deleteFile(state.filePath, { relativeToBaseDir: false }); }
 
 const signalingListeners = new Set<(event: MainToRendererSignalingEvent) => void>();
@@ -649,9 +654,9 @@ const api: OpenNowApi = {
   getMicrophonePermission: async (): Promise<MicrophonePermissionResult> => ({ platform: "android", isMacOs: false, status: "not-applicable", granted: true, canRequest: true, shouldUseBrowserApi: true }),
   exportLogs: async () => unsupported("Log export is not supported on Android in this pass."),
   pingRegions: async (regions: StreamRegion[]): Promise<PingResult[]> => Promise.all(regions.map(async (region) => { const startedAt = performance.now(); try { await httpRequest<string>(region.url, { responseType: "text" }); return { url: region.url, pingMs: Math.round(performance.now() - startedAt) }; } catch (error) { return { url: region.url, pingMs: null, error: error instanceof Error ? error.message : String(error) }; } })),
-  saveScreenshot: async (input: ScreenshotSaveRequest): Promise<ScreenshotEntry> => { await ensureDirectory(SCREENSHOT_DIR); const fileName = `${Date.now()}-${Math.random().toString(16).slice(2)}.${dataUrlExtension(input.dataUrl)}`; const filePath = `${SCREENSHOT_DIR}/${fileName}`; await Filesystem.writeFile({ path: filePath, directory: Directory.Data, data: decodeDataUrl(input.dataUrl), recursive: true }); const stat = await Filesystem.stat({ path: filePath, directory: Directory.Data }); return { id: fileName, fileName, filePath, createdAtMs: Number(stat.ctime ?? Date.now()), sizeBytes: stat.size, dataUrl: input.dataUrl }; },
-  listScreenshots: async (): Promise<ScreenshotEntry[]> => { const files = await listDirectory(SCREENSHOT_DIR); const entries = await Promise.all(files.map(async (file) => { const filePath = `${SCREENSHOT_DIR}/${file.name}`; const stat = await Filesystem.stat({ path: filePath, directory: Directory.Data }); const mime = file.name.endsWith(".jpg") ? "image/jpeg" : file.name.endsWith(".webp") ? "image/webp" : "image/png"; return { id: file.name, fileName: file.name, filePath, createdAtMs: Number(stat.ctime ?? Date.now()), sizeBytes: stat.size, dataUrl: await readDataUrl(filePath, mime) } satisfies ScreenshotEntry; })); return entries.sort((a, b) => b.createdAtMs - a.createdAtMs); },
-  deleteScreenshot: async (input: ScreenshotDeleteRequest) => { await deleteFile(`${SCREENSHOT_DIR}/${input.id}`, { relativeToBaseDir: false }); },
+  saveScreenshot: async (input: ScreenshotSaveRequest): Promise<ScreenshotEntry> => { await ensureDirectory(SCREENSHOT_DIR); const fileName = `${Date.now()}-${Math.random().toString(16).slice(2)}.${dataUrlExtension(input.dataUrl)}`; const filePath = `${SCREENSHOT_DIR}/${fileName}`; await writeFile(filePath, decodeDataUrl(input.dataUrl), { relativeToBaseDir: false }); const stat = await Filesystem.stat({ path: filePath, directory: Directory.Data }); const entry: ScreenshotEntry = { id: fileName, fileName, filePath, createdAtMs: Number(stat.ctime ?? Date.now()), sizeBytes: stat.size, dataUrl: input.dataUrl, gameTitle: input.gameTitle }; const entries = await readScreenshotMeta(); await writeScreenshotMeta([{ id: entry.id, fileName: entry.fileName, filePath: entry.filePath, createdAtMs: entry.createdAtMs, sizeBytes: entry.sizeBytes, gameTitle: entry.gameTitle }, ...entries.filter((item) => item.id !== entry.id)]); return entry; },
+  listScreenshots: async (): Promise<ScreenshotEntry[]> => { const files = await listDirectory(SCREENSHOT_DIR); const metadata = await readScreenshotMeta(); const metaById = new Map(metadata.map((entry) => [entry.id, entry])); const entries = await Promise.all(files.map(async (file) => { const filePath = `${SCREENSHOT_DIR}/${file.name}`; const stat = await Filesystem.stat({ path: filePath, directory: Directory.Data }); const meta = metaById.get(file.name); return { id: file.name, fileName: file.name, filePath, createdAtMs: meta?.createdAtMs ?? Number(stat.ctime ?? Date.now()), sizeBytes: meta?.sizeBytes ?? stat.size, gameTitle: meta?.gameTitle, dataUrl: await readDataUrl(filePath, screenshotMimeType(file.name)) } satisfies ScreenshotEntry; })); return entries.sort((a, b) => b.createdAtMs - a.createdAtMs); },
+  deleteScreenshot: async (input: ScreenshotDeleteRequest) => { await deleteFile(`${SCREENSHOT_DIR}/${input.id}`, { relativeToBaseDir: false }); const entries = await readScreenshotMeta(); await writeScreenshotMeta(entries.filter((entry) => entry.id !== input.id)); },
   saveScreenshotAs: async (_input: ScreenshotSaveAsRequest): Promise<ScreenshotSaveAsResult> => unsupported("Screenshot export is not supported on Android.") as Promise<ScreenshotSaveAsResult>,
   onTriggerScreenshot: () => () => undefined,
   beginRecording: async (input: RecordingBeginRequest): Promise<RecordingBeginResult> => { const recordingId = crypto.randomUUID(); recordingStates.set(recordingId, await createRecordingDraft(recordingId, input.mimeType)); return { recordingId }; },
@@ -661,10 +666,10 @@ const api: OpenNowApi = {
   listRecordings: async (): Promise<RecordingEntry[]> => { const entries = await readRecordingMeta(); return entries.sort((a, b) => b.createdAtMs - a.createdAtMs); },
   deleteRecording: async (input: RecordingDeleteRequest) => { const entries = await readRecordingMeta(); const match = entries.find((entry) => entry.id === input.id); if (match) await deleteFile(match.filePath, { relativeToBaseDir: false }); await writeRecordingMeta(entries.filter((entry) => entry.id !== input.id)); },
   showRecordingInFolder: async () => unsupported("Folder access is not supported on Android."),
-  listMediaByGame: async (input = {}): Promise<MediaListingResult> => { const screenshots = await api.listScreenshots(); const recordings = await api.listRecordings(); const title = input.gameTitle?.trim().toLowerCase(); return { screenshots: title ? [] : screenshots.map((entry) => ({ ...entry })), videos: recordings.filter((entry) => !title || entry.gameTitle?.trim().toLowerCase() === title).map((entry) => ({ ...entry })) }; },
+  listMediaByGame: async (input = {}): Promise<MediaListingResult> => { const screenshots = await api.listScreenshots(); const recordings = await api.listRecordings(); const title = input.gameTitle?.trim().toLowerCase(); return { screenshots: screenshots.filter((entry) => !title || entry.gameTitle?.trim().toLowerCase() === title).map((entry) => ({ ...entry })), videos: recordings.filter((entry) => !title || entry.gameTitle?.trim().toLowerCase() === title).map((entry) => ({ ...entry })) }; },
   getMediaThumbnail: async (input: { filePath: string }) => { if (input.filePath.startsWith(SCREENSHOT_DIR)) return readDataUrl(input.filePath, "image/png"); const recordings = await readRecordingMeta(); return recordings.find((entry) => entry.filePath === input.filePath)?.thumbnailDataUrl ?? null; },
   showMediaInFolder: async () => unsupported("Folder access is not supported on Android."),
-  deleteCache: async () => { await Promise.all([clearDirectory(SCREENSHOT_DIR, { relativeToBaseDir: false }), clearDirectory(RECORDING_DIR, { relativeToBaseDir: false }), writeRecordingMeta([]), removePreference(THANKS_CACHE_KEY)]); },
+  deleteCache: async () => { await Promise.all([clearDirectory(SCREENSHOT_DIR, { relativeToBaseDir: false }), clearDirectory(RECORDING_DIR, { relativeToBaseDir: false }), writeRecordingMeta([]), writeScreenshotMeta([]), removePreference(THANKS_CACHE_KEY)]); },
   fetchPrintedWasteQueue: async (): Promise<PrintedWasteQueueData> => fetchPrintedWasteQueueRequest(),
   fetchPrintedWasteServerMapping: async (): Promise<PrintedWasteServerMapping> => fetchPrintedWasteServerMappingRequest(),
   getThanksData: async (): Promise<ThankYouDataResult> => { const cached = await readPreferenceJson<ThankYouDataResult | null>(THANKS_CACHE_KEY, null); if (cached) return cached; const placeholder: ThankYouDataResult = { contributors: [], supporters: [], contributorsError: "Community data is unavailable on Android in this pass." }; await writePreferenceJson(THANKS_CACHE_KEY, placeholder); return placeholder; },
