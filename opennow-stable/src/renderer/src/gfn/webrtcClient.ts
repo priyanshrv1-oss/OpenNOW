@@ -38,7 +38,7 @@ import {
   rewriteH265TierFlag,
 } from "./sdp";
 import { MicrophoneManager, type MicState, type MicStateChange } from "./microphoneManager";
-import { openNow, platformCapabilities } from "../platform";
+import { openNow } from "../platform";
 
 interface OfferSettings {
   codec: VideoCodec;
@@ -442,6 +442,7 @@ export class GfnWebRtcClient {
   private remoteCandidateKeys = new Set<string>();
   private remoteCandidateAttemptId = 0;
   private currentRemoteIceUfrag: string | null = null;
+  private currentRemoteCandidatesUseUsernameFragment = false;
 
   // Input mode: all input types (mouse, keyboard, gamepad) work simultaneously
   // Removed exclusive mode switching to allow concurrent input
@@ -894,6 +895,7 @@ export class GfnWebRtcClient {
     this.remoteCandidateKeys.clear();
     this.remoteCandidateAttemptId = attemptId;
     this.currentRemoteIceUfrag = remoteIceUfrag;
+    this.currentRemoteCandidatesUseUsernameFragment = false;
   }
 
   private remoteCandidateKey(candidate: RTCIceCandidateInit): string {
@@ -933,10 +935,14 @@ export class GfnWebRtcClient {
     if (!this.currentRemoteIceUfrag) {
       return true;
     }
-    if (!platformCapabilities.remoteIceCandidatesIncludeUsernameFragment && !candidate.usernameFragment) {
+    if (!candidate.usernameFragment) {
+      return !this.currentRemoteCandidatesUseUsernameFragment;
+    }
+    if (candidate.usernameFragment === this.currentRemoteIceUfrag) {
+      this.currentRemoteCandidatesUseUsernameFragment = true;
       return true;
     }
-    return candidate.usernameFragment === this.currentRemoteIceUfrag;
+    return false;
   }
 
   private isHealthyIceState(state: RTCIceConnectionState | null | undefined): boolean {
@@ -3893,28 +3899,7 @@ export class GfnWebRtcClient {
         if (!isCurrentConnectionAttempt() || this.pc !== relayPc) return;
         this.log("Relay PC local description set, waiting for ICE gathering...");
 
-        const finalRelaySdp = await this.waitForIceGathering(relayPc, 5000);
-        if (!isCurrentConnectionAttempt() || this.pc !== relayPc) return;
-        this.log(`Relay ICE gathering done, final SDP length: ${finalRelaySdp.length} chars`);
-
-        const relayCredentials = extractIceCredentials(finalRelaySdp);
-        const nvstSdpRelay = buildNvstSdp({
-          width,
-          height,
-          fps: settings.fps,
-          maxBitrateKbps: settings.maxBitrateKbps,
-          partialReliableThresholdMs: this.partialReliableThresholdMs,
-          hidDeviceMask: this.riInputCapabilities.hidDeviceMask,
-          enablePartiallyReliableTransferGamepad: this.riInputCapabilities.enablePartiallyReliableTransferGamepad,
-          enablePartiallyReliableTransferHid: this.riInputCapabilities.enablePartiallyReliableTransferHid,
-          codec: effectiveCodec,
-          colorQuality: settings.colorQuality,
-          credentials: relayCredentials,
-        });
-
-        await openNow.sendAnswer({ sdp: finalRelaySdp, nvstSdp: nvstSdpRelay });
-        if (!isCurrentConnectionAttempt() || this.pc !== relayPc) return;
-        this.log("Relay fallback: sent relay answer to signaling");
+        this.log("Relay fallback: local relay peer configured without sending a second signaling answer");
 
         // Attempt manual mediaConnectionInfo injection again (UDP/TCP) — server may
         // accept TCP connections even when UDP fails.

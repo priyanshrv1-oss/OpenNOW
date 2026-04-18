@@ -750,11 +750,17 @@ export function StreamView({
   }, []);
 
   useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+    const syncFullscreenState = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement) || document.body.dataset.androidFullscreen === "true");
     };
-    document.addEventListener("fullscreenchange", handleFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    syncFullscreenState();
+    const observer = new MutationObserver(syncFullscreenState);
+    observer.observe(document.body, { attributes: true, attributeFilter: ["data-android-fullscreen"] });
+    document.addEventListener("fullscreenchange", syncFullscreenState);
+    return () => {
+      observer.disconnect();
+      document.removeEventListener("fullscreenchange", syncFullscreenState);
+    };
   }, []);
 
   useEffect(() => {
