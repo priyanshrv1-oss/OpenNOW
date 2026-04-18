@@ -18,8 +18,14 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "dist": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder",
-    "dist:signed": "npm run build && electron-builder",
+    "package:ci": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --publish never --config electron-builder.json",
+    "package:signed": "electron-builder --config electron-builder.json",
+    "package:mac:catalina:ci": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --publish never --config electron-builder.catalina.json --mac dmg zip --x64",
+    "package:mac:catalina:signed": "electron-builder --config electron-builder.catalina.json --mac dmg zip --x64",
+    "dist": "npm run build && npm run package:ci",
+    "dist:signed": "npm run build && npm run package:signed",
+    "dist:mac:catalina": "npm run build && npm run package:mac:catalina:ci",
+    "dist:mac:catalina:signed": "npm run build && npm run package:mac:catalina:signed",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.json",
     "test": "tsx --test src/shared/gfn.test.ts src/renderer/src/lib/launchOwnership.test.ts src/renderer/src/components/GameCard.test.ts src/renderer/src/gfn/inputProtocol.test.ts"
   },
@@ -46,58 +52,5 @@
     "tsx": "^4.20.6",
     "typescript": "^6.0.2",
     "vite": "^7.3.1"
-  },
-  "build": {
-    "appId": "com.zortos.opennow.stable",
-    "productName": "OpenNOW",
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "OpenCloudGaming",
-        "repo": "OpenNOW"
-      }
-    ],
-    "icon": "../logo.png",
-    "npmRebuild": false,
-    "nodeGypRebuild": false,
-    "buildDependenciesFromSource": false,
-    "directories": {
-      "output": "dist-release"
-    },
-    "files": [
-      "dist/**",
-      "dist-electron/**",
-      "package.json"
-    ],
-    "asar": true,
-    "win": {
-      "target": [
-        "nsis",
-        "portable"
-      ]
-    },
-    "nsis": {
-      "artifactName": "OpenNOW-v${version}-setup-${arch}.${ext}"
-    },
-    "portable": {
-      "artifactName": "OpenNOW-v${version}-portable-${arch}.${ext}"
-    },
-    "mac": {
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "category": "public.app-category.games",
-      "artifactName": "OpenNOW-v${version}-mac-${arch}.${ext}"
-    },
-    "linux": {
-      "target": [
-        "AppImage",
-        "deb"
-      ],
-      "category": "Game",
-      "maintainer": "zortos293 <zortos293@users.noreply.github.com>",
-      "artifactName": "OpenNOW-v${version}-linux-${arch}.${ext}"
-    }
   }
 }
