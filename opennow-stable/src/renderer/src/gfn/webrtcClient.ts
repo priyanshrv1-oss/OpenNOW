@@ -930,9 +930,10 @@ export class GfnWebRtcClient {
   }
 
   private matchesCurrentRemoteIceScope(candidate: RTCIceCandidateInit): boolean {
-    return !this.currentRemoteIceUfrag
-      || !candidate.usernameFragment
-      || candidate.usernameFragment === this.currentRemoteIceUfrag;
+    if (!this.currentRemoteIceUfrag) {
+      return true;
+    }
+    return candidate.usernameFragment === this.currentRemoteIceUfrag;
   }
 
   private isHealthyIceState(state: RTCIceConnectionState | null | undefined): boolean {

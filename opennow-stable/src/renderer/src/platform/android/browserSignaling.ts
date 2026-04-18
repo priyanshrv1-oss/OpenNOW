@@ -30,6 +30,11 @@ function randomKey(): string {
   return btoa(binary);
 }
 
+function isIpLiteralHost(host: string): boolean {
+  const normalized = host.replace(/^\[|\]$/g, "");
+  return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(normalized) || normalized.includes(":");
+}
+
 export class BrowserSignalingClient {
   private ws: WebSocket | null = null;
   private peerId = 2;
@@ -93,6 +98,12 @@ export class BrowserSignalingClient {
       : `${input.signalingServer}:443`;
     const baseUrl = input.signalingUrl?.trim() || `wss://${fallbackHost}/nvst/`;
     const signInUrl = new URL(baseUrl);
+    if (input.signalingServer?.trim()) {
+      const preferredAuthority = new URL(`wss://${input.signalingServer.trim()}`);
+      if (isIpLiteralHost(signInUrl.hostname) && !isIpLiteralHost(preferredAuthority.hostname)) {
+        signInUrl.host = preferredAuthority.host;
+      }
+    }
     signInUrl.protocol = "wss:";
     signInUrl.pathname = `${signInUrl.pathname.replace(/\/?$/, "/")}sign_in`;
     signInUrl.search = "";
