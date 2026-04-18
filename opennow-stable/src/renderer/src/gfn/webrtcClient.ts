@@ -887,6 +887,11 @@ export class GfnWebRtcClient {
     this.remoteCandidateKeys.clear();
   }
 
+  private clearReplayCandidateState(): void {
+    this.remoteCandidates = [];
+    this.remoteCandidateKeys.clear();
+  }
+
   private remoteCandidateKey(candidate: RTCIceCandidateInit): string {
     return JSON.stringify([
       candidate.candidate,
@@ -2141,6 +2146,7 @@ export class GfnWebRtcClient {
         continue;
       }
       this.queuedCandidateKeys.delete(this.remoteCandidateKey(candidate));
+      this.rememberRemoteCandidate(candidate);
       await targetPc.addIceCandidate(candidate);
     }
   }
@@ -3401,6 +3407,7 @@ export class GfnWebRtcClient {
 
   async handleOffer(offerSdp: string, session: SessionInfo, settings: OfferSettings): Promise<void> {
     this.cleanupPeerConnection();
+    this.clearReplayCandidateState();
     const connectionAttemptId = ++this.connectionAttemptId;
     this.log("=== handleOffer START ===");
     this.log(`Session: id=${session.sessionId}, status=${session.status}, serverIp=${session.serverIp}`);

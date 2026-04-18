@@ -45,7 +45,7 @@ npm run dist
 npm run dist:signed
 ```
 
-GitHub Actions also builds a testable unsigned Android debug APK artifact in the `auto-build` workflow for pull requests and manual dispatch runs.
+GitHub Actions also builds a testable unsigned Android debug APK artifact in the `auto-build` workflow for pull requests, pushes to `main` and `dev`, and manual workflow runs.
 
 ## Workspace Layout
 
