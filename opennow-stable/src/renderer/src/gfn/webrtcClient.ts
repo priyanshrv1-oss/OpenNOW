@@ -38,6 +38,7 @@ import {
   rewriteH265TierFlag,
 } from "./sdp";
 import { MicrophoneManager, type MicState, type MicStateChange } from "./microphoneManager";
+import { HapticsManager } from "./hapticsManager";
 
 interface OfferSettings {
   codec: VideoCodec;
@@ -537,6 +538,7 @@ export class GfnWebRtcClient {
   // Microphone
   private micManager: MicrophoneManager | null = null;
   private micState: MicState = "uninitialized";
+  private hapticsManager: HapticsManager | null = null;
 
   // Stream info
   private currentCodec = "";
@@ -616,6 +618,8 @@ export class GfnWebRtcClient {
         this.micManager.setDeviceId(options.microphoneDeviceId);
       }
     }
+
+    this.hapticsManager = new HapticsManager((line) => this.log(line));
   }
 
   private shouldAutoFullscreen(): boolean {
@@ -1519,6 +1523,7 @@ export class GfnWebRtcClient {
   }
 
   private cleanupPeerConnection(): void {
+    this.hapticsManager?.stopAll();
     this.clearTimers();
     this.detachInputCapture();
     this.closeDataChannels();
@@ -1804,6 +1809,7 @@ export class GfnWebRtcClient {
         // Gamepad disconnected — clear bit from bitmap
         this.connectedGamepads.delete(i);
         this.previousGamepadStates.delete(i);
+        this.hapticsManager?.stopController(i);
         this.gamepadBitmap &= ~(1 << i);
         this.log(`Gamepad ${i} disconnected, bitmap now: 0x${this.gamepadBitmap.toString(16)}`);
         this.diagnostics.connectedGamepads = this.connectedGamepads.size;
@@ -1832,6 +1838,7 @@ export class GfnWebRtcClient {
       }
     }
 
+    this.hapticsManager?.stopDisconnectedControllers(gamepads);
     this.diagnostics.connectedGamepads = connectedCount;
   }
 
@@ -2037,9 +2044,11 @@ export class GfnWebRtcClient {
       return;
     }
 
-    if (!parsed || typeof parsed !== "object" || !("timerNotification" in parsed)) {
+    if (!parsed || typeof parsed !== "object") {
       return;
     }
+
+    this.hapticsManager?.processMessage(parsed);
 
     const timerNotification = (parsed as { timerNotification?: unknown }).timerNotification;
     if (!timerNotification || typeof timerNotification !== "object") {
@@ -3699,6 +3708,7 @@ export class GfnWebRtcClient {
   }
 
   dispose(): void {
+    this.hapticsManager?.stopAll();
     this.cleanupPeerConnection();
 
     // Cleanup microphone
@@ -3706,6 +3716,7 @@ export class GfnWebRtcClient {
       this.micManager.dispose();
       this.micManager = null;
     }
+    this.hapticsManager = null;
 
     for (const track of this.videoStream.getTracks()) {
       this.videoStream.removeTrack(track);
