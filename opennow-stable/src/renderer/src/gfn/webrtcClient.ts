@@ -1884,6 +1884,7 @@ export class GfnWebRtcClient {
 
   private onGamepadDisconnected = (event: GamepadEvent): void => {
     this.log(`Gamepad disconnected event: ${event.gamepad.id}`);
+    this.hapticsManager?.stopController(event.gamepad.index);
     // The polling loop will detect and handle the disconnection
   };
 

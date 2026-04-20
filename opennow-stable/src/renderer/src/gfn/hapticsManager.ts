@@ -166,9 +166,14 @@ export class HapticsManager {
       return null;
     }
 
-    const candidates = this.collectCandidates(payload as LooseRecord);
+    const root = payload as LooseRecord;
+    if (!this.containsHapticFields(root)) {
+      return null;
+    }
+
+    const candidates = this.collectCandidates(root);
     for (const candidate of candidates) {
-      const command = this.parseCommandCandidate(candidate, payload as LooseRecord);
+      const command = this.parseCommandCandidate(candidate, root);
       if (command) {
         return command;
       }
@@ -187,6 +192,38 @@ export class HapticsManager {
       }
     }
     return candidates;
+  }
+
+  private containsHapticFields(source: unknown): boolean {
+    if (!source || typeof source !== "object") {
+      return false;
+    }
+
+    const record = source as LooseRecord;
+    const hapticKeys = [
+      "durationMs",
+      "duration",
+      "haptic",
+      "rumble",
+      "vibration",
+      "leftMotor",
+      "rightMotor",
+      "strongMagnitude",
+      "weakMagnitude",
+    ];
+    for (const key of hapticKeys) {
+      if (key in record) {
+        return true;
+      }
+    }
+
+    for (const value of Object.values(record)) {
+      if (value && typeof value === "object" && this.containsHapticFields(value)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private parseCommandCandidate(candidate: LooseRecord, root: LooseRecord): HapticCommand | null {
