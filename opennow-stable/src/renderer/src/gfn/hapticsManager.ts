@@ -210,6 +210,9 @@ export class HapticsManager {
       "rightMotor",
       "strongMagnitude",
       "weakMagnitude",
+      "stop",
+      "action",
+      "type",
     ];
     for (const key of hapticKeys) {
       if (key in record) {
