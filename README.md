@@ -85,6 +85,53 @@ Current packaging targets:
 | Linux ARM64 | `AppImage`, `deb` |
 | iOS | `ipa` |
 
+## Nix
+
+You'll need to add this repo into your flake.nix:
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    
+    opennow.url = "github:OpenCloudGaming/OpenNOW"; 
+  };
+
+  outputs = {
+    self,
+    nixpkgs,
+    opennow,
+    ... }@inputs: {
+  };
+}
+```
+Then add the package to your configuration:
+
+```nix
+# Home-manager
+{
+  pkgs,
+  inputs,
+  ...
+}: {
+  home.packages = with pkgs; [
+    inputs.opennow.packages.${pkgs.system}.default
+  ];
+}
+```
+
+```nix
+# Nix configuraion
+{
+  pkgs,
+  inputs,
+  ...
+}: {
+  environment.systemPackages = with pkgs; [
+    inputs.opennow.packages.${pkgs.system}.default
+  ];
+}
+```
+
 ### Develop Locally
 
 From the repository root:
