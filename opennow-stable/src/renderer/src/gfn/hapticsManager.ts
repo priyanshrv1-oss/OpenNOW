@@ -88,7 +88,7 @@ export class HapticsManager {
     }
 
     const actuator = gamepad.vibrationActuator;
-    if (!actuator || actuator.type !== "dual-rumble") {
+    if (!actuator || !this.isDualRumbleActuator(actuator)) {
       if (!this.unsupportedControllers.has(command.controllerIndex)) {
         this.unsupportedControllers.add(command.controllerIndex);
         this.log(
@@ -98,7 +98,7 @@ export class HapticsManager {
       return;
     }
 
-    if (active?.timeoutId !== null) {
+    if (active && active.timeoutId !== null) {
       window.clearTimeout(active.timeoutId);
     }
 
@@ -128,14 +128,14 @@ export class HapticsManager {
 
   private stopControllerInternal(controllerIndex: number, reason: string): void {
     const active = this.activeByController.get(controllerIndex);
-    if (active?.timeoutId !== null) {
+    if (active && active.timeoutId !== null) {
       window.clearTimeout(active.timeoutId);
     }
     this.activeByController.delete(controllerIndex);
 
     const gamepad = this.getGamepad(controllerIndex);
     const actuator = gamepad?.vibrationActuator;
-    if (actuator && actuator.type === "dual-rumble") {
+    if (actuator && this.isDualRumbleActuator(actuator)) {
       void actuator.playEffect("dual-rumble", {
         startDelay: 0,
         duration: 0,
@@ -192,7 +192,7 @@ export class HapticsManager {
   private parseCommandCandidate(candidate: LooseRecord, root: LooseRecord): HapticCommand | null {
     const controllerIndexRaw = this.readNumber(candidate, ["controllerIndex", "controllerId", "gamepadIndex", "index", "pad"])
       ?? this.readNumber(root, ["controllerIndex", "controllerId", "gamepadIndex", "index", "pad"]);
-    if (!Number.isFinite(controllerIndexRaw)) {
+    if (controllerIndexRaw === null || !Number.isFinite(controllerIndexRaw)) {
       return null;
     }
 
@@ -271,6 +271,14 @@ export class HapticsManager {
 
   private isValidControllerIndex(controllerIndex: number): boolean {
     return controllerIndex >= 0 && controllerIndex < GAMEPAD_MAX_CONTROLLERS;
+  }
+
+  private isDualRumbleActuator(actuator: GamepadHapticActuator): boolean {
+    const typedActuator = actuator as GamepadHapticActuator & { type?: string };
+    if (typedActuator.type === undefined) {
+      return true;
+    }
+    return typedActuator.type === "dual-rumble";
   }
 
   private log(message: string): void {
