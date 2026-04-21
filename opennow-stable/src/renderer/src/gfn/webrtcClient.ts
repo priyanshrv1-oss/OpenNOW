@@ -2,10 +2,12 @@ import type {
   IceCandidatePayload,
   ColorQuality,
   IceServer,
+  GfnControllerType,
   SessionInfo,
   VideoCodec,
   MicrophoneMode,
 } from "@shared/gfn";
+import { mapGamepadIdToGfnControllerType } from "@shared/gfn";
 
 import {
   InputEncoder,
@@ -38,6 +40,7 @@ import {
   rewriteH265TierFlag,
 } from "./sdp";
 import { MicrophoneManager, type MicState, type MicStateChange } from "./microphoneManager";
+import { HapticsManager } from "./hapticsManager";
 
 interface OfferSettings {
   codec: VideoCodec;
@@ -341,6 +344,43 @@ async function toBytes(data: string | Blob | ArrayBuffer): Promise<Uint8Array> {
   return new Uint8Array(arrayBuffer);
 }
 
+function bytesPreview(bytes: Uint8Array, maxBytes = 24): string {
+  const slice = bytes.slice(0, maxBytes);
+  return Array.from(slice)
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join(" ");
+}
+
+function asciiPreview(bytes: Uint8Array, maxBytes = 64): string {
+  const slice = bytes.slice(0, maxBytes);
+  return Array.from(slice)
+    .map((value) => {
+      if (value >= 32 && value <= 126) {
+        return String.fromCharCode(value);
+      }
+      return ".";
+    })
+    .join("");
+}
+
+function formatControllerTypeLabel(type: GfnControllerType): string {
+  if (type === 0) return "xbox";
+  if (type === 2) return "playstation";
+  if (type === 5) return "nintendo";
+  return `unknown(${type})`;
+}
+
+function containsHapticKeyword(value: unknown): boolean {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const normalized = value.toLowerCase();
+  return normalized.includes("haptic")
+    || normalized.includes("rumble")
+    || normalized.includes("vibration")
+    || normalized.includes("feedback");
+}
+
 /**
  * Detect GPU type using browser APIs
  * Uses WebGL renderer string to identify GPU vendor/model
@@ -537,6 +577,7 @@ export class GfnWebRtcClient {
   // Microphone
   private micManager: MicrophoneManager | null = null;
   private micState: MicState = "uninitialized";
+  private hapticsManager: HapticsManager | null = null;
 
   // Stream info
   private currentCodec = "";
@@ -616,6 +657,8 @@ export class GfnWebRtcClient {
         this.micManager.setDeviceId(options.microphoneDeviceId);
       }
     }
+
+    this.hapticsManager = new HapticsManager((line) => this.log(line));
   }
 
   private shouldAutoFullscreen(): boolean {
@@ -1519,6 +1562,7 @@ export class GfnWebRtcClient {
   }
 
   private cleanupPeerConnection(): void {
+    this.hapticsManager?.stopAll();
     this.clearTimers();
     this.detachInputCapture();
     this.closeDataChannels();
@@ -1804,6 +1848,7 @@ export class GfnWebRtcClient {
         // Gamepad disconnected — clear bit from bitmap
         this.connectedGamepads.delete(i);
         this.previousGamepadStates.delete(i);
+        this.hapticsManager?.stopController(i);
         this.gamepadBitmap &= ~(1 << i);
         this.log(`Gamepad ${i} disconnected, bitmap now: 0x${this.gamepadBitmap.toString(16)}`);
         this.diagnostics.connectedGamepads = this.connectedGamepads.size;
@@ -1832,6 +1877,7 @@ export class GfnWebRtcClient {
       }
     }
 
+    this.hapticsManager?.stopDisconnectedControllers(gamepads);
     this.diagnostics.connectedGamepads = connectedCount;
   }
 
@@ -1872,11 +1918,16 @@ export class GfnWebRtcClient {
 
   private onGamepadConnected = (event: GamepadEvent): void => {
     this.log(`Gamepad connected event: ${event.gamepad.id}`);
+    const controllerType = mapGamepadIdToGfnControllerType(event.gamepad.id);
+    this.log(
+      `Gamepad ${event.gamepad.index} type detected: ${formatControllerTypeLabel(controllerType)} (${controllerType})`,
+    );
     // The polling loop will detect and handle the new gamepad
   };
 
   private onGamepadDisconnected = (event: GamepadEvent): void => {
     this.log(`Gamepad disconnected event: ${event.gamepad.id}`);
+    this.hapticsManager?.stopController(event.gamepad.index);
     // The polling loop will detect and handle the disconnection
   };
 
@@ -2019,26 +2070,70 @@ export class GfnWebRtcClient {
   }
 
   private async onControlChannelMessage(data: string | Blob | ArrayBuffer): Promise<void> {
-    let payloadText: string;
-    if (typeof data === "string") {
-      payloadText = data;
-    } else if (data instanceof Blob) {
-      payloadText = await data.text();
-    } else if (data instanceof ArrayBuffer) {
-      payloadText = new TextDecoder().decode(data);
-    } else {
+    const bytes = await toBytes(data);
+    const dataKind = typeof data === "string"
+      ? "string"
+      : data instanceof Blob
+        ? "blob"
+        : data instanceof ArrayBuffer
+          ? "arraybuffer"
+          : "unknown";
+    const firstByte = bytes.length > 0 ? bytes[0] : undefined;
+    this.log(
+      `control_channel rx kind=${dataKind} bytes=${bytes.length} firstByte=${firstByte !== undefined ? `0x${firstByte.toString(16).padStart(2, "0")}` : "n/a"} hex=[${bytesPreview(bytes)}] ascii="${asciiPreview(bytes)}"`,
+    );
+
+    const binaryHandled = this.hapticsManager?.processBinaryMessage(bytes) ?? false;
+    if (binaryHandled) {
+      this.log("control_channel binary payload routed to haptics manager");
       return;
     }
 
+    const payloadText = new TextDecoder().decode(bytes);
     let parsed: unknown;
     try {
       parsed = JSON.parse(payloadText);
     } catch {
+      this.log("control_channel payload is not valid JSON");
       return;
     }
 
-    if (!parsed || typeof parsed !== "object" || !("timerNotification" in parsed)) {
+    if (!parsed || typeof parsed !== "object") {
+      this.log("control_channel JSON payload ignored (non-object)");
       return;
+    }
+
+    const jsonHandled = this.hapticsManager?.processMessage(parsed) ?? false;
+    if (jsonHandled) {
+      this.log("control_channel JSON payload routed to haptics manager");
+    } else {
+      const parsedRecord = parsed as Record<string, unknown>;
+      const messageType = typeof parsedRecord.messageType === "string" ? parsedRecord.messageType : "n/a";
+      const eventType = typeof parsedRecord.eventType === "string" ? parsedRecord.eventType : "n/a";
+      const commandType = typeof parsedRecord.commandType === "string" ? parsedRecord.commandType : "n/a";
+      const customMessage = typeof parsedRecord.customMessage === "string" ? parsedRecord.customMessage : null;
+      let customType = "n/a";
+      let customMessageKeywordHit = false;
+      if (customMessage) {
+        try {
+          const maybeCustom = JSON.parse(customMessage) as { messageType?: unknown; eventType?: unknown; commandType?: unknown };
+          if (typeof maybeCustom.messageType === "string") customType = maybeCustom.messageType;
+          else if (typeof maybeCustom.eventType === "string") customType = maybeCustom.eventType;
+          else if (typeof maybeCustom.commandType === "string") customType = maybeCustom.commandType;
+          customMessageKeywordHit = Object.values(maybeCustom).some((value) => containsHapticKeyword(value));
+        } catch {
+          customType = "unparseable";
+        }
+      }
+      const topLevelKeywordHit = Object.values(parsedRecord).some((value) => containsHapticKeyword(value));
+      this.log(
+        `control_channel JSON filtered from haptics (messageType=${messageType}, eventType=${eventType}, commandType=${commandType}, customMessageType=${customType})`,
+      );
+      if (topLevelKeywordHit || customMessageKeywordHit) {
+        this.log(
+          `control_channel filtered payload contains haptic-like keywords (topLevel=${topLevelKeywordHit}, customMessage=${customMessageKeywordHit})`,
+        );
+      }
     }
 
     const timerNotification = (parsed as { timerNotification?: unknown }).timerNotification;
@@ -3352,6 +3447,17 @@ export class GfnWebRtcClient {
       this.log(`  SDP> ${line}`);
     }
     this.log(`=== FULL OFFER SDP END ===`);
+    const hapticRelatedOfferLines = offerSdp
+      .split(/\r?\n/)
+      .filter((line) => /(haptic|rumble|vibration)/i.test(line));
+    if (hapticRelatedOfferLines.length > 0) {
+      this.log(`Offer SDP haptic-related lines (${hapticRelatedOfferLines.length}):`);
+      for (const line of hapticRelatedOfferLines) {
+        this.log(`  SDP[haptics]> ${line}`);
+      }
+    } else {
+      this.log("Offer SDP contains no explicit haptic/rumble/vibration attributes");
+    }
 
     this.riInputCapabilities = parseRiInputCapabilities(offerSdp);
     const negotiatedPartialReliable = this.riInputCapabilities.partialReliableThresholdMs;
@@ -3699,6 +3805,7 @@ export class GfnWebRtcClient {
   }
 
   dispose(): void {
+    this.hapticsManager?.stopAll();
     this.cleanupPeerConnection();
 
     // Cleanup microphone
@@ -3706,6 +3813,7 @@ export class GfnWebRtcClient {
       this.micManager.dispose();
       this.micManager = null;
     }
+    this.hapticsManager = null;
 
     for (const track of this.videoStream.getTracks()) {
       this.videoStream.removeTrack(track);

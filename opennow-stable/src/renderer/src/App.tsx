@@ -25,10 +25,13 @@ import type {
   VideoCodec,
   PrintedWasteQueueData,
   PrintedWasteServerMapping,
+  GfnControllerType,
 } from "@shared/gfn";
 import {
   DEFAULT_KEYBOARD_LAYOUT,
+  GFN_CONTROLLER_TYPE_DEFAULTS,
   getDefaultStreamPreferences,
+  mapGamepadIdToGfnControllerType,
   USER_FACING_VIDEO_CODEC_OPTIONS,
   getPreferredSessionAdMediaUrl,
   getSessionAdDurationMs,
@@ -256,6 +259,26 @@ function parseNumericId(value: string | undefined): number | null {
   if (!isNumericId(value)) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function detectConnectedControllerTypes(): GfnControllerType[] {
+  const gamepads = navigator.getGamepads?.();
+  if (!gamepads) {
+    return [...GFN_CONTROLLER_TYPE_DEFAULTS];
+  }
+
+  const detected = new Set<GfnControllerType>();
+  for (const gamepad of gamepads) {
+    if (!gamepad || !gamepad.connected) {
+      continue;
+    }
+    detected.add(mapGamepadIdToGfnControllerType(gamepad.id));
+  }
+
+  if (detected.size === 0) {
+    return [...GFN_CONTROLLER_TYPE_DEFAULTS];
+  }
+  return [...detected];
 }
 
 function defaultVariantId(game: GameInfo): string {
@@ -2496,6 +2519,9 @@ export function App(): JSX.Element {
       setStreamingStore(null);
     }
 
+    const supportedControllerTypes = detectConnectedControllerTypes();
+    console.log(`[Input] claimSession controller capability types=${supportedControllerTypes.join(",")}`);
+
     const claimed = await window.openNow.claimSession({
       token,
       streamingBaseUrl: effectiveStreamingBaseUrl,
@@ -2512,6 +2538,7 @@ export function App(): JSX.Element {
         gameLanguage: settings.gameLanguage,
         enableL4S: settings.enableL4S,
         enableCloudGsync: settings.enableCloudGsync,
+        supportedControllerTypes,
       },
     });
 
@@ -2655,6 +2682,9 @@ export function App(): JSX.Element {
       }
 
       // Create new session
+      const supportedControllerTypes = detectConnectedControllerTypes();
+      console.log(`[Input] createSession controller capability types=${supportedControllerTypes.join(",")}`);
+
       const newSession = await window.openNow.createSession({
         token: token || undefined,
         streamingBaseUrl: options?.streamingBaseUrl || effectiveStreamingBaseUrl,
@@ -2673,6 +2703,7 @@ export function App(): JSX.Element {
           gameLanguage: settings.gameLanguage,
           enableL4S: settings.enableL4S,
           enableCloudGsync: settings.enableCloudGsync,
+          supportedControllerTypes,
         },
       });
 

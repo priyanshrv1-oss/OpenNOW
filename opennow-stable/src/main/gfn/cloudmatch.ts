@@ -20,6 +20,7 @@ import type {
 
 import {
   DEFAULT_KEYBOARD_LAYOUT,
+  GFN_CONTROLLER_TYPE_DEFAULTS,
   colorQualityBitDepth,
   colorQualityChromaFormat,
   resolveGfnKeyboardLayout,
@@ -33,6 +34,8 @@ const GFN_USER_AGENT =
 const GFN_CLIENT_VERSION = "2.0.80.173";
 const SESSION_MODIFY_ACTION_AD_UPDATE = 6;
 const READY_SESSION_STATUSES = new Set([2, 3]);
+const GFN_REMOTE_CONTROLLERS_BITMAP_ALL = 0x0f;
+const GFN_SUPPORTED_HID_DEVICES_MASK = GFN_REMOTE_CONTROLLERS_BITMAP_ALL;
 
 const AD_ACTION_CODES: Record<SessionAdAction, number> = {
   start: 1,
@@ -464,11 +467,16 @@ function buildSessionRequestBody(input: SessionCreateRequest): CloudMatchRequest
   const chromaFormat = colorQualityChromaFormat(cq);
   const accountLinked = input.accountLinked ?? true;
 
+  const supportedControllerTypes =
+    Array.isArray(input.settings.supportedControllerTypes) && input.settings.supportedControllerTypes.length > 0
+      ? [...new Set(input.settings.supportedControllerTypes)]
+      : [...GFN_CONTROLLER_TYPE_DEFAULTS];
+
   return {
     sessionRequestData: {
       appId: input.appId,
       internalTitle: input.internalTitle || null,
-      availableSupportedControllers: [],
+      availableSupportedControllers: supportedControllerTypes,
       networkTestSessionId: null,
       parentSessionId: null,
       clientIdentification: "GFN-PC",
@@ -514,7 +522,7 @@ function buildSessionRequestBody(input: SessionCreateRequest): CloudMatchRequest
           }
         : null,
       surroundAudioInfo: 0,
-      remoteControllersBitmap: 0,
+      remoteControllersBitmap: GFN_REMOTE_CONTROLLERS_BITMAP_ALL,
       clientTimezoneOffset: timezoneOffsetMs(),
       enhancedStreamMode: 1,
       appLaunchMode: 1,
@@ -530,7 +538,7 @@ function buildSessionRequestBody(input: SessionCreateRequest): CloudMatchRequest
         enabledL4S: input.settings.enableL4S,
         mouseMovementFlags: 0,
         trueHdr: hdrEnabled,
-        supportedHidDevices: 0,
+        supportedHidDevices: GFN_SUPPORTED_HID_DEVICES_MASK,
         profile: 0,
         fallbackToLogicalResolution: false,
         hidDevices: null,
@@ -915,6 +923,17 @@ export async function createSession(input: SessionCreateRequest): Promise<Sessio
   const deviceId = crypto.randomUUID();
 
   const body = buildSessionRequestBody(input);
+  const requestedFeatures = body.sessionRequestData.requestedStreamingFeatures;
+  const metadataKeys = body.sessionRequestData.metaData.map((entry) => entry.key);
+  console.log(
+    `[CloudMatch] createSession capabilities: controllers=${JSON.stringify(body.sessionRequestData.availableSupportedControllers)}, ` +
+    `remoteControllersBitmap=${body.sessionRequestData.remoteControllersBitmap}, ` +
+    `supportedHidDevices=${requestedFeatures.supportedHidDevices}, ` +
+    `mouseMovementFlags=${requestedFeatures.mouseMovementFlags}, ` +
+    `enhancedStreamMode=${body.sessionRequestData.enhancedStreamMode}, ` +
+    `metaDataKeys=${JSON.stringify(metadataKeys)}, ` +
+    `requestedStreamingFeaturesKeys=${JSON.stringify(Object.keys(requestedFeatures))}`,
+  );
 
   const base = resolveStreamingBaseUrl(input.zone, input.streamingBaseUrl);
   const keyboardLayout = resolveGfnKeyboardLayout(input.settings.keyboardLayout ?? DEFAULT_KEYBOARD_LAYOUT, process.platform);
@@ -1200,16 +1219,21 @@ function buildClaimRequestBody(sessionId: string, appId: string, settings: Strea
   const subSessionId = crypto.randomUUID();
   const timezoneMs = timezoneOffsetMs();
 
+  const supportedControllerTypes =
+    Array.isArray(settings.supportedControllerTypes) && settings.supportedControllerTypes.length > 0
+      ? [...new Set(settings.supportedControllerTypes)]
+      : [...GFN_CONTROLLER_TYPE_DEFAULTS];
+
   return {
     action: 2,
     data: "RESUME",
-    sessionRequestData: {
-      // Minimal fields required for resume - NO streaming parameter renegotiation
-      audioMode: 2,
-      remoteControllersBitmap: 0,
-      sdrHdrMode: 0,
-      networkTestSessionId: null,
-      availableSupportedControllers: [],
+      sessionRequestData: {
+        // Minimal fields required for resume - NO streaming parameter renegotiation
+        audioMode: 2,
+        remoteControllersBitmap: GFN_REMOTE_CONTROLLERS_BITMAP_ALL,
+        sdrHdrMode: 0,
+        networkTestSessionId: null,
+        availableSupportedControllers: supportedControllerTypes,
       clientVersion: "30.0",
       deviceHashId: deviceId,
       internalTitle: null,
