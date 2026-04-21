@@ -35,6 +35,7 @@ const GFN_CLIENT_VERSION = "2.0.80.173";
 const SESSION_MODIFY_ACTION_AD_UPDATE = 6;
 const READY_SESSION_STATUSES = new Set([2, 3]);
 const GFN_REMOTE_CONTROLLERS_BITMAP_ALL = 0x0f;
+const GFN_SUPPORTED_HID_DEVICES_MASK = GFN_REMOTE_CONTROLLERS_BITMAP_ALL;
 
 const AD_ACTION_CODES: Record<SessionAdAction, number> = {
   start: 1,
@@ -537,7 +538,7 @@ function buildSessionRequestBody(input: SessionCreateRequest): CloudMatchRequest
         enabledL4S: input.settings.enableL4S,
         mouseMovementFlags: 0,
         trueHdr: hdrEnabled,
-        supportedHidDevices: 0,
+        supportedHidDevices: GFN_SUPPORTED_HID_DEVICES_MASK,
         profile: 0,
         fallbackToLogicalResolution: false,
         hidDevices: null,
