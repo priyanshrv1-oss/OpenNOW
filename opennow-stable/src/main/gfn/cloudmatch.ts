@@ -33,6 +33,8 @@ const GFN_USER_AGENT =
 const GFN_CLIENT_VERSION = "2.0.80.173";
 const SESSION_MODIFY_ACTION_AD_UPDATE = 6;
 const READY_SESSION_STATUSES = new Set([2, 3]);
+const GFN_SUPPORTED_CONTROLLER_TYPES = Object.freeze([0, 2, 5]);
+const GFN_REMOTE_CONTROLLERS_BITMAP_ALL = 0x0f;
 
 const AD_ACTION_CODES: Record<SessionAdAction, number> = {
   start: 1,
@@ -468,7 +470,7 @@ function buildSessionRequestBody(input: SessionCreateRequest): CloudMatchRequest
     sessionRequestData: {
       appId: input.appId,
       internalTitle: input.internalTitle || null,
-      availableSupportedControllers: [],
+      availableSupportedControllers: [...GFN_SUPPORTED_CONTROLLER_TYPES],
       networkTestSessionId: null,
       parentSessionId: null,
       clientIdentification: "GFN-PC",
@@ -514,7 +516,7 @@ function buildSessionRequestBody(input: SessionCreateRequest): CloudMatchRequest
           }
         : null,
       surroundAudioInfo: 0,
-      remoteControllersBitmap: 0,
+      remoteControllersBitmap: GFN_REMOTE_CONTROLLERS_BITMAP_ALL,
       clientTimezoneOffset: timezoneOffsetMs(),
       enhancedStreamMode: 1,
       appLaunchMode: 1,
@@ -1211,13 +1213,13 @@ function buildClaimRequestBody(sessionId: string, appId: string, settings: Strea
   return {
     action: 2,
     data: "RESUME",
-    sessionRequestData: {
-      // Minimal fields required for resume - NO streaming parameter renegotiation
-      audioMode: 2,
-      remoteControllersBitmap: 0,
-      sdrHdrMode: 0,
-      networkTestSessionId: null,
-      availableSupportedControllers: [],
+      sessionRequestData: {
+        // Minimal fields required for resume - NO streaming parameter renegotiation
+        audioMode: 2,
+        remoteControllersBitmap: GFN_REMOTE_CONTROLLERS_BITMAP_ALL,
+        sdrHdrMode: 0,
+        networkTestSessionId: null,
+        availableSupportedControllers: [...GFN_SUPPORTED_CONTROLLER_TYPES],
       clientVersion: "30.0",
       deviceHashId: deviceId,
       internalTitle: null,
