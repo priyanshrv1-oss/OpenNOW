@@ -923,12 +923,15 @@ export async function createSession(input: SessionCreateRequest): Promise<Sessio
 
   const body = buildSessionRequestBody(input);
   const requestedFeatures = body.sessionRequestData.requestedStreamingFeatures;
+  const metadataKeys = body.sessionRequestData.metaData.map((entry) => entry.key);
   console.log(
     `[CloudMatch] createSession capabilities: controllers=${JSON.stringify(body.sessionRequestData.availableSupportedControllers)}, ` +
     `remoteControllersBitmap=${body.sessionRequestData.remoteControllersBitmap}, ` +
     `supportedHidDevices=${requestedFeatures.supportedHidDevices}, ` +
     `mouseMovementFlags=${requestedFeatures.mouseMovementFlags}, ` +
-    `enhancedStreamMode=${body.sessionRequestData.enhancedStreamMode}`,
+    `enhancedStreamMode=${body.sessionRequestData.enhancedStreamMode}, ` +
+    `metaDataKeys=${JSON.stringify(metadataKeys)}, ` +
+    `requestedStreamingFeaturesKeys=${JSON.stringify(Object.keys(requestedFeatures))}`,
   );
 
   const base = resolveStreamingBaseUrl(input.zone, input.streamingBaseUrl);

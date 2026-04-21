@@ -447,12 +447,29 @@ export interface StreamSettings {
 
 export function mapGamepadIdToGfnControllerType(gamepadId: string): GfnControllerType {
   const normalized = gamepadId.toLowerCase();
+  const vendorMatch = normalized.match(/vendor:\s*([0-9a-f]{4})/i);
+  const vendorId = vendorMatch?.[1]?.toLowerCase();
+  if (vendorId === "045e") {
+    return GFN_CONTROLLER_TYPE_XBOX;
+  }
+  if (vendorId === "054c") {
+    return GFN_CONTROLLER_TYPE_PLAYSTATION;
+  }
+  if (vendorId === "057e") {
+    return GFN_CONTROLLER_TYPE_NINTENDO_SWITCH;
+  }
+  if (
+    normalized.includes("xbox")
+    || normalized.includes("xinput")
+    || normalized.includes("microsoft")
+  ) {
+    return GFN_CONTROLLER_TYPE_XBOX;
+  }
   if (
     normalized.includes("playstation")
     || normalized.includes("dualshock")
     || normalized.includes("dualsense")
     || normalized.includes("sony")
-    || normalized.includes("wireless controller")
   ) {
     return GFN_CONTROLLER_TYPE_PLAYSTATION;
   }
@@ -464,12 +481,8 @@ export function mapGamepadIdToGfnControllerType(gamepadId: string): GfnControlle
   ) {
     return GFN_CONTROLLER_TYPE_NINTENDO_SWITCH;
   }
-  if (
-    normalized.includes("xbox")
-    || normalized.includes("xinput")
-    || normalized.includes("microsoft")
-  ) {
-    return GFN_CONTROLLER_TYPE_XBOX;
+  if (normalized === "wireless controller" || normalized.includes("wireless controller")) {
+    return GFN_CONTROLLER_TYPE_PLAYSTATION;
   }
   return GFN_CONTROLLER_TYPE_FALLBACK;
 }

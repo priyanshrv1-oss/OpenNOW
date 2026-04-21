@@ -370,6 +370,17 @@ function formatControllerTypeLabel(type: GfnControllerType): string {
   return `unknown(${type})`;
 }
 
+function containsHapticKeyword(value: unknown): boolean {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const normalized = value.toLowerCase();
+  return normalized.includes("haptic")
+    || normalized.includes("rumble")
+    || normalized.includes("vibration")
+    || normalized.includes("feedback");
+}
+
 /**
  * Detect GPU type using browser APIs
  * Uses WebGL renderer string to identify GPU vendor/model
@@ -2102,19 +2113,27 @@ export class GfnWebRtcClient {
       const commandType = typeof parsedRecord.commandType === "string" ? parsedRecord.commandType : "n/a";
       const customMessage = typeof parsedRecord.customMessage === "string" ? parsedRecord.customMessage : null;
       let customType = "n/a";
+      let customMessageKeywordHit = false;
       if (customMessage) {
         try {
           const maybeCustom = JSON.parse(customMessage) as { messageType?: unknown; eventType?: unknown; commandType?: unknown };
           if (typeof maybeCustom.messageType === "string") customType = maybeCustom.messageType;
           else if (typeof maybeCustom.eventType === "string") customType = maybeCustom.eventType;
           else if (typeof maybeCustom.commandType === "string") customType = maybeCustom.commandType;
+          customMessageKeywordHit = Object.values(maybeCustom).some((value) => containsHapticKeyword(value));
         } catch {
           customType = "unparseable";
         }
       }
+      const topLevelKeywordHit = Object.values(parsedRecord).some((value) => containsHapticKeyword(value));
       this.log(
         `control_channel JSON filtered from haptics (messageType=${messageType}, eventType=${eventType}, commandType=${commandType}, customMessageType=${customType})`,
       );
+      if (topLevelKeywordHit || customMessageKeywordHit) {
+        this.log(
+          `control_channel filtered payload contains haptic-like keywords (topLevel=${topLevelKeywordHit}, customMessage=${customMessageKeywordHit})`,
+        );
+      }
     }
 
     const timerNotification = (parsed as { timerNotification?: unknown }).timerNotification;
