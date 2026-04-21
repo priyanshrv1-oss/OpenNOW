@@ -100,6 +100,16 @@ export function colorQualityIs10Bit(cq: ColorQuality): boolean {
 
 export type MicrophoneMode = "disabled" | "push-to-talk" | "voice-activity";
 export type AspectRatio = "16:9" | "16:10" | "21:9" | "32:9";
+export type GfnControllerType = 0 | 2 | 5;
+export const GFN_CONTROLLER_TYPE_XBOX: GfnControllerType = 0;
+export const GFN_CONTROLLER_TYPE_PLAYSTATION: GfnControllerType = 2;
+export const GFN_CONTROLLER_TYPE_NINTENDO_SWITCH: GfnControllerType = 5;
+export const GFN_CONTROLLER_TYPE_FALLBACK: GfnControllerType = GFN_CONTROLLER_TYPE_XBOX;
+export const GFN_CONTROLLER_TYPE_DEFAULTS: readonly GfnControllerType[] = [
+  GFN_CONTROLLER_TYPE_XBOX,
+  GFN_CONTROLLER_TYPE_PLAYSTATION,
+  GFN_CONTROLLER_TYPE_NINTENDO_SWITCH,
+] as const;
 export type RuntimePlatform =
   | "aix"
   | "android"
@@ -431,6 +441,37 @@ export interface StreamSettings {
   enableL4S: boolean;
   /** Request Cloud G-Sync / Variable Refresh Rate on new sessions */
   enableCloudGsync: boolean;
+  /** Detected local controller families the client can expose to GFN (e.g. Xbox/PlayStation/Nintendo) */
+  supportedControllerTypes?: GfnControllerType[];
+}
+
+export function mapGamepadIdToGfnControllerType(gamepadId: string): GfnControllerType {
+  const normalized = gamepadId.toLowerCase();
+  if (
+    normalized.includes("playstation")
+    || normalized.includes("dualshock")
+    || normalized.includes("dualsense")
+    || normalized.includes("sony")
+    || normalized.includes("wireless controller")
+  ) {
+    return GFN_CONTROLLER_TYPE_PLAYSTATION;
+  }
+  if (
+    normalized.includes("nintendo")
+    || normalized.includes("switch")
+    || normalized.includes("joy-con")
+    || normalized.includes("pro controller")
+  ) {
+    return GFN_CONTROLLER_TYPE_NINTENDO_SWITCH;
+  }
+  if (
+    normalized.includes("xbox")
+    || normalized.includes("xinput")
+    || normalized.includes("microsoft")
+  ) {
+    return GFN_CONTROLLER_TYPE_XBOX;
+  }
+  return GFN_CONTROLLER_TYPE_FALLBACK;
 }
 
 export interface SessionCreateRequest {

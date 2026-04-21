@@ -20,6 +20,7 @@ import type {
 
 import {
   DEFAULT_KEYBOARD_LAYOUT,
+  GFN_CONTROLLER_TYPE_DEFAULTS,
   colorQualityBitDepth,
   colorQualityChromaFormat,
   resolveGfnKeyboardLayout,
@@ -33,7 +34,6 @@ const GFN_USER_AGENT =
 const GFN_CLIENT_VERSION = "2.0.80.173";
 const SESSION_MODIFY_ACTION_AD_UPDATE = 6;
 const READY_SESSION_STATUSES = new Set([2, 3]);
-const GFN_SUPPORTED_CONTROLLER_TYPES = Object.freeze([0, 2, 5]);
 const GFN_REMOTE_CONTROLLERS_BITMAP_ALL = 0x0f;
 
 const AD_ACTION_CODES: Record<SessionAdAction, number> = {
@@ -466,11 +466,16 @@ function buildSessionRequestBody(input: SessionCreateRequest): CloudMatchRequest
   const chromaFormat = colorQualityChromaFormat(cq);
   const accountLinked = input.accountLinked ?? true;
 
+  const supportedControllerTypes =
+    Array.isArray(input.settings.supportedControllerTypes) && input.settings.supportedControllerTypes.length > 0
+      ? [...new Set(input.settings.supportedControllerTypes)]
+      : [...GFN_CONTROLLER_TYPE_DEFAULTS];
+
   return {
     sessionRequestData: {
       appId: input.appId,
       internalTitle: input.internalTitle || null,
-      availableSupportedControllers: [...GFN_SUPPORTED_CONTROLLER_TYPES],
+      availableSupportedControllers: supportedControllerTypes,
       networkTestSessionId: null,
       parentSessionId: null,
       clientIdentification: "GFN-PC",
@@ -1210,6 +1215,11 @@ function buildClaimRequestBody(sessionId: string, appId: string, settings: Strea
   const subSessionId = crypto.randomUUID();
   const timezoneMs = timezoneOffsetMs();
 
+  const supportedControllerTypes =
+    Array.isArray(settings.supportedControllerTypes) && settings.supportedControllerTypes.length > 0
+      ? [...new Set(settings.supportedControllerTypes)]
+      : [...GFN_CONTROLLER_TYPE_DEFAULTS];
+
   return {
     action: 2,
     data: "RESUME",
@@ -1219,7 +1229,7 @@ function buildClaimRequestBody(sessionId: string, appId: string, settings: Strea
         remoteControllersBitmap: GFN_REMOTE_CONTROLLERS_BITMAP_ALL,
         sdrHdrMode: 0,
         networkTestSessionId: null,
-        availableSupportedControllers: [...GFN_SUPPORTED_CONTROLLER_TYPES],
+        availableSupportedControllers: supportedControllerTypes,
       clientVersion: "30.0",
       deviceHashId: deviceId,
       internalTitle: null,

@@ -2,10 +2,12 @@ import type {
   IceCandidatePayload,
   ColorQuality,
   IceServer,
+  GfnControllerType,
   SessionInfo,
   VideoCodec,
   MicrophoneMode,
 } from "@shared/gfn";
+import { mapGamepadIdToGfnControllerType } from "@shared/gfn";
 
 import {
   InputEncoder,
@@ -359,6 +361,13 @@ function asciiPreview(bytes: Uint8Array, maxBytes = 64): string {
       return ".";
     })
     .join("");
+}
+
+function formatControllerTypeLabel(type: GfnControllerType): string {
+  if (type === 0) return "xbox";
+  if (type === 2) return "playstation";
+  if (type === 5) return "nintendo";
+  return `unknown(${type})`;
 }
 
 /**
@@ -1898,6 +1907,10 @@ export class GfnWebRtcClient {
 
   private onGamepadConnected = (event: GamepadEvent): void => {
     this.log(`Gamepad connected event: ${event.gamepad.id}`);
+    const controllerType = mapGamepadIdToGfnControllerType(event.gamepad.id);
+    this.log(
+      `Gamepad ${event.gamepad.index} type detected: ${formatControllerTypeLabel(controllerType)} (${controllerType})`,
+    );
     // The polling loop will detect and handle the new gamepad
   };
 
@@ -2082,6 +2095,26 @@ export class GfnWebRtcClient {
     const jsonHandled = this.hapticsManager?.processMessage(parsed) ?? false;
     if (jsonHandled) {
       this.log("control_channel JSON payload routed to haptics manager");
+    } else {
+      const parsedRecord = parsed as Record<string, unknown>;
+      const messageType = typeof parsedRecord.messageType === "string" ? parsedRecord.messageType : "n/a";
+      const eventType = typeof parsedRecord.eventType === "string" ? parsedRecord.eventType : "n/a";
+      const commandType = typeof parsedRecord.commandType === "string" ? parsedRecord.commandType : "n/a";
+      const customMessage = typeof parsedRecord.customMessage === "string" ? parsedRecord.customMessage : null;
+      let customType = "n/a";
+      if (customMessage) {
+        try {
+          const maybeCustom = JSON.parse(customMessage) as { messageType?: unknown; eventType?: unknown; commandType?: unknown };
+          if (typeof maybeCustom.messageType === "string") customType = maybeCustom.messageType;
+          else if (typeof maybeCustom.eventType === "string") customType = maybeCustom.eventType;
+          else if (typeof maybeCustom.commandType === "string") customType = maybeCustom.commandType;
+        } catch {
+          customType = "unparseable";
+        }
+      }
+      this.log(
+        `control_channel JSON filtered from haptics (messageType=${messageType}, eventType=${eventType}, commandType=${commandType}, customMessageType=${customType})`,
+      );
     }
 
     const timerNotification = (parsed as { timerNotification?: unknown }).timerNotification;
