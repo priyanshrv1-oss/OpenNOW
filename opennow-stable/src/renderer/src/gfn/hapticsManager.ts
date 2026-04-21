@@ -187,11 +187,12 @@ export class HapticsManager {
     }
 
     const root = payload as LooseRecord;
-    if (!this.containsHapticFields(root)) {
+    const candidates = this.collectCandidates(root);
+    const hasHapticSignals = candidates.some((candidate) => this.containsHapticFields(candidate));
+    if (!hasHapticSignals) {
       return null;
     }
 
-    const candidates = this.collectCandidates(root);
     for (const candidate of candidates) {
       const command = this.parseCommandCandidate(candidate, root);
       if (command) {
@@ -282,14 +283,36 @@ export class HapticsManager {
   }
 
   private collectCandidates(root: LooseRecord): LooseRecord[] {
-    const candidates: LooseRecord[] = [root];
-    const nestedKeys = ["haptic", "rumble", "vibration", "payload", "data", "params", "message", "command"];
-    for (const key of nestedKeys) {
-      const value = root[key];
-      if (value && typeof value === "object") {
-        candidates.push(value as LooseRecord);
+    const candidates: LooseRecord[] = [];
+    const queue: LooseRecord[] = [root];
+    const visited = new Set<LooseRecord>();
+    const nestedKeys = ["haptic", "rumble", "vibration", "payload", "data", "params", "message", "command", "nvExtendedCommandMessage"];
+
+    while (queue.length > 0 && candidates.length < 32) {
+      const current = queue.shift();
+      if (!current || visited.has(current)) {
+        continue;
+      }
+      visited.add(current);
+      candidates.push(current);
+
+      for (const key of nestedKeys) {
+        const value = current[key];
+        if (value && typeof value === "object") {
+          queue.push(value as LooseRecord);
+        }
+      }
+
+      const customMessage = current.customMessage;
+      if (typeof customMessage === "string" && customMessage.trim().length > 0) {
+        const parsedCustom = this.parseNestedJsonString(customMessage);
+        if (parsedCustom) {
+          this.log(`parsed customMessage: ${JSON.stringify(parsedCustom)}`);
+          queue.push(parsedCustom);
+        }
       }
     }
+
     return candidates;
   }
 
@@ -312,11 +335,16 @@ export class HapticsManager {
       "stop",
       "action",
       "type",
+      "customMessage",
     ];
     for (const key of hapticKeys) {
       if (key in record) {
         return true;
       }
+    }
+
+    if (this.hasHapticKeywordSignal(record)) {
+      return true;
     }
 
     for (const value of Object.values(record)) {
@@ -410,6 +438,48 @@ export class HapticsManager {
 
   private isValidControllerIndex(controllerIndex: number): boolean {
     return controllerIndex >= 0 && controllerIndex < GAMEPAD_MAX_CONTROLLERS;
+  }
+
+  private hasHapticKeywordSignal(record: LooseRecord): boolean {
+    const signalKeys = ["messageType", "commandType", "eventType", "name", "kind", "type", "action"];
+    for (const key of signalKeys) {
+      const value = record[key];
+      if (typeof value !== "string") {
+        continue;
+      }
+      const normalized = value.toLowerCase();
+      if (normalized.includes("haptic") || normalized.includes("rumble") || normalized.includes("vibration")) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private parseNestedJsonString(raw: string): LooseRecord | null {
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const tryParse = (input: string): unknown => {
+      try {
+        return JSON.parse(input);
+      } catch {
+        return null;
+      }
+    };
+
+    const parsed = tryParse(trimmed);
+    if (parsed && typeof parsed === "object") {
+      return parsed as LooseRecord;
+    }
+    if (typeof parsed === "string") {
+      const parsedTwice = tryParse(parsed);
+      if (parsedTwice && typeof parsedTwice === "object") {
+        return parsedTwice as LooseRecord;
+      }
+    }
+    return null;
   }
 
   private isDualRumbleActuator(actuator: GamepadHapticActuator): boolean {
