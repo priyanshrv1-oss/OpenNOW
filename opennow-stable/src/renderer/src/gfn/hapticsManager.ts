@@ -2,6 +2,16 @@ import { GAMEPAD_MAX_CONTROLLERS } from "./inputProtocol";
 
 const MAX_VIBRATION_MS = 5000;
 const DEBOUNCE_MS = 16;
+const PROBABLE_BINARY_HAPTIC_MESSAGE_TYPES = new Set<number>([
+  0x0c,
+  0x0d,
+  0x12,
+  0x13,
+  0x20,
+  0x21,
+  0x30,
+  0x31,
+]);
 
 interface HapticCommand {
   controllerIndex: number;
@@ -26,6 +36,16 @@ export class HapticsManager {
 
   public processMessage(payload: unknown): boolean {
     const command = this.extractCommand(payload);
+    if (!command) {
+      return false;
+    }
+
+    this.applyCommand(command);
+    return true;
+  }
+
+  public processBinaryMessage(bytes: Uint8Array): boolean {
+    const command = this.extractBinaryCommand(bytes);
     if (!command) {
       return false;
     }
@@ -180,6 +200,85 @@ export class HapticsManager {
     }
 
     return null;
+  }
+
+  private extractBinaryCommand(bytes: Uint8Array): HapticCommand | null {
+    if (bytes.length < 7) {
+      return null;
+    }
+
+    const type = bytes[0];
+    if (typeof type !== "number" || !PROBABLE_BINARY_HAPTIC_MESSAGE_TYPES.has(type)) {
+      return null;
+    }
+
+    const command =
+      this.parseBinaryU16Layout(bytes, true) ??
+      this.parseBinaryU8Layout(bytes, true) ??
+      this.parseBinaryU16Layout(bytes, false) ??
+      this.parseBinaryU8Layout(bytes, false);
+
+    if (!command) {
+      return null;
+    }
+
+    this.log(
+      `binary haptic message decoded type=0x${type.toString(16)} controller=${command.controllerIndex} duration=${command.durationMs}ms left=${command.leftMotor.toFixed(2)} right=${command.rightMotor.toFixed(2)}`,
+    );
+    return command;
+  }
+
+  private parseBinaryU16Layout(bytes: Uint8Array, hasTypeByte: boolean): HapticCommand | null {
+    const start = hasTypeByte ? 1 : 0;
+    if (bytes.length < start + 7) {
+      return null;
+    }
+
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const controllerIndex = view.getUint8(start);
+    if (!this.isValidControllerIndex(controllerIndex)) {
+      return null;
+    }
+
+    const durationMs = Math.min(MAX_VIBRATION_MS, view.getUint16(start + 1, true));
+    const leftMotor = this.normalizeMotor(view.getUint16(start + 3, true) / 65535);
+    const rightMotor = this.normalizeMotor(view.getUint16(start + 5, true) / 65535);
+    if (!this.isPlausibleBinaryHaptic(durationMs, leftMotor, rightMotor)) {
+      return null;
+    }
+
+    return { controllerIndex, durationMs, leftMotor, rightMotor };
+  }
+
+  private parseBinaryU8Layout(bytes: Uint8Array, hasTypeByte: boolean): HapticCommand | null {
+    const start = hasTypeByte ? 1 : 0;
+    if (bytes.length < start + 5) {
+      return null;
+    }
+
+    const controllerIndex = bytes[start];
+    if (!this.isValidControllerIndex(controllerIndex)) {
+      return null;
+    }
+
+    const durationMs = Math.min(MAX_VIBRATION_MS, (bytes[start + 1]! | (bytes[start + 2]! << 8)));
+    const leftMotor = this.normalizeMotor((bytes[start + 3] ?? 0) / 255);
+    const rightMotor = this.normalizeMotor((bytes[start + 4] ?? 0) / 255);
+    if (!this.isPlausibleBinaryHaptic(durationMs, leftMotor, rightMotor)) {
+      return null;
+    }
+
+    return { controllerIndex, durationMs, leftMotor, rightMotor };
+  }
+
+  private isPlausibleBinaryHaptic(durationMs: number, leftMotor: number, rightMotor: number): boolean {
+    if (!Number.isFinite(durationMs) || durationMs < 0 || durationMs > MAX_VIBRATION_MS) {
+      return false;
+    }
+    if (!Number.isFinite(leftMotor) || !Number.isFinite(rightMotor)) {
+      return false;
+    }
+    return (durationMs > 0 && (leftMotor > 0 || rightMotor > 0)) || (durationMs === 0 && leftMotor === 0 && rightMotor === 0);
   }
 
   private collectCandidates(root: LooseRecord): LooseRecord[] {

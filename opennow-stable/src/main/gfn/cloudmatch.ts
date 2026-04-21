@@ -915,6 +915,14 @@ export async function createSession(input: SessionCreateRequest): Promise<Sessio
   const deviceId = crypto.randomUUID();
 
   const body = buildSessionRequestBody(input);
+  const requestedFeatures = body.sessionRequestData.requestedStreamingFeatures;
+  console.log(
+    `[CloudMatch] createSession capabilities: controllers=${JSON.stringify(body.sessionRequestData.availableSupportedControllers)}, ` +
+    `remoteControllersBitmap=${body.sessionRequestData.remoteControllersBitmap}, ` +
+    `supportedHidDevices=${requestedFeatures.supportedHidDevices}, ` +
+    `mouseMovementFlags=${requestedFeatures.mouseMovementFlags}, ` +
+    `enhancedStreamMode=${body.sessionRequestData.enhancedStreamMode}`,
+  );
 
   const base = resolveStreamingBaseUrl(input.zone, input.streamingBaseUrl);
   const keyboardLayout = resolveGfnKeyboardLayout(input.settings.keyboardLayout ?? DEFAULT_KEYBOARD_LAYOUT, process.platform);

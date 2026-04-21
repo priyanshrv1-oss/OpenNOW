@@ -342,6 +342,25 @@ async function toBytes(data: string | Blob | ArrayBuffer): Promise<Uint8Array> {
   return new Uint8Array(arrayBuffer);
 }
 
+function bytesPreview(bytes: Uint8Array, maxBytes = 24): string {
+  const slice = bytes.slice(0, maxBytes);
+  return Array.from(slice)
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join(" ");
+}
+
+function asciiPreview(bytes: Uint8Array, maxBytes = 64): string {
+  const slice = bytes.slice(0, maxBytes);
+  return Array.from(slice)
+    .map((value) => {
+      if (value >= 32 && value <= 126) {
+        return String.fromCharCode(value);
+      }
+      return ".";
+    })
+    .join("");
+}
+
 /**
  * Detect GPU type using browser APIs
  * Uses WebGL renderer string to identify GPU vendor/model
@@ -2027,29 +2046,43 @@ export class GfnWebRtcClient {
   }
 
   private async onControlChannelMessage(data: string | Blob | ArrayBuffer): Promise<void> {
-    let payloadText: string;
-    if (typeof data === "string") {
-      payloadText = data;
-    } else if (data instanceof Blob) {
-      payloadText = await data.text();
-    } else if (data instanceof ArrayBuffer) {
-      payloadText = new TextDecoder().decode(data);
-    } else {
+    const bytes = await toBytes(data);
+    const dataKind = typeof data === "string"
+      ? "string"
+      : data instanceof Blob
+        ? "blob"
+        : data instanceof ArrayBuffer
+          ? "arraybuffer"
+          : "unknown";
+    const firstByte = bytes.length > 0 ? bytes[0] : undefined;
+    this.log(
+      `control_channel rx kind=${dataKind} bytes=${bytes.length} firstByte=${firstByte !== undefined ? `0x${firstByte.toString(16).padStart(2, "0")}` : "n/a"} hex=[${bytesPreview(bytes)}] ascii="${asciiPreview(bytes)}"`,
+    );
+
+    const binaryHandled = this.hapticsManager?.processBinaryMessage(bytes) ?? false;
+    if (binaryHandled) {
+      this.log("control_channel binary payload routed to haptics manager");
       return;
     }
 
+    const payloadText = new TextDecoder().decode(bytes);
     let parsed: unknown;
     try {
       parsed = JSON.parse(payloadText);
     } catch {
+      this.log("control_channel payload is not valid JSON");
       return;
     }
 
     if (!parsed || typeof parsed !== "object") {
+      this.log("control_channel JSON payload ignored (non-object)");
       return;
     }
 
-    this.hapticsManager?.processMessage(parsed);
+    const jsonHandled = this.hapticsManager?.processMessage(parsed) ?? false;
+    if (jsonHandled) {
+      this.log("control_channel JSON payload routed to haptics manager");
+    }
 
     const timerNotification = (parsed as { timerNotification?: unknown }).timerNotification;
     if (!timerNotification || typeof timerNotification !== "object") {
@@ -3362,6 +3395,17 @@ export class GfnWebRtcClient {
       this.log(`  SDP> ${line}`);
     }
     this.log(`=== FULL OFFER SDP END ===`);
+    const hapticRelatedOfferLines = offerSdp
+      .split(/\r?\n/)
+      .filter((line) => /(haptic|rumble|vibration)/i.test(line));
+    if (hapticRelatedOfferLines.length > 0) {
+      this.log(`Offer SDP haptic-related lines (${hapticRelatedOfferLines.length}):`);
+      for (const line of hapticRelatedOfferLines) {
+        this.log(`  SDP[haptics]> ${line}`);
+      }
+    } else {
+      this.log("Offer SDP contains no explicit haptic/rumble/vibration attributes");
+    }
 
     this.riInputCapabilities = parseRiInputCapabilities(offerSdp);
     const negotiatedPartialReliable = this.riInputCapabilities.partialReliableThresholdMs;
