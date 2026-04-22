@@ -812,6 +812,16 @@ export class AuthService {
     return isNearExpiry(tokens.expiresAt, TOKEN_REFRESH_WINDOW_MS);
   }
 
+  private shouldDiscardSessionAfterRefreshFailure(tokens: AuthTokens, refreshFailed: boolean): boolean {
+    if (isExpired(tokens.expiresAt)) {
+      return true;
+    }
+    if (!refreshFailed && !tokens.clientToken && !tokens.refreshToken) {
+      return true;
+    }
+    return false;
+  }
+
   async ensureValidSessionWithStatus(forceRefresh = false): Promise<AuthSessionResult> {
     if (!this.session) {
       return {
@@ -932,10 +942,9 @@ export class AuthService {
     }
 
     const errorText = refreshErrors.length > 0 ? refreshErrors.join(" | ") : undefined;
-    const expired = isExpired(tokens.expiresAt);
 
     if (!tokens.clientToken && !tokens.refreshToken) {
-      if (expired) {
+      if (this.shouldDiscardSessionAfterRefreshFailure(tokens, false)) {
         await this.logout();
         return {
           session: null,
@@ -959,7 +968,7 @@ export class AuthService {
       };
     }
 
-    if (expired) {
+    if (this.shouldDiscardSessionAfterRefreshFailure(tokens, true)) {
       await this.logout();
       return {
         session: null,

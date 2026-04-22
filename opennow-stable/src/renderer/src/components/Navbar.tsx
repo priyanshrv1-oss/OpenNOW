@@ -48,6 +48,9 @@ export function Navbar({
   ];
 
   const tierInfo = user ? getTierDisplay(user.membershipTier) : null;
+  const activeAccountAriaLabel = user
+    ? `Account: ${user.displayName} (${tierInfo?.label || "Unknown"})`
+    : undefined;
   const formatHours = (value: number): string => {
     if (!Number.isFinite(value)) return "0";
     const rounded = value >= 10 ? Math.round(value) : Math.round(value * 10) / 10;
@@ -354,7 +357,12 @@ export function Navbar({
                 )}
               </div>
             </div>
-            <button onClick={onLogout} className="navbar-logout" title="Sign out">
+            <button
+              onClick={onLogout}
+              className="navbar-logout"
+              title="Sign out"
+              aria-label={activeAccountAriaLabel}
+            >
               <LogOut size={16} />
             </button>
           </>
