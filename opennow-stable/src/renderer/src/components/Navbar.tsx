@@ -367,7 +367,7 @@ export function Navbar({
                 className="navbar-user navbar-user--clickable"
                 onClick={() => setAccountDropdownOpen((previous) => !previous)}
                 aria-expanded={accountDropdownOpen}
-                aria-haspopup="menu"
+                aria-label="Account options"
               >
                 {user.avatarUrl ? (
                   <img src={user.avatarUrl} alt={user.displayName} className="navbar-avatar" />
@@ -388,7 +388,7 @@ export function Navbar({
                 />
               </button>
               {accountDropdownOpen && (
-                <div className="navbar-account-dropdown" role="menu" aria-label="Switch account">
+                <div className="navbar-account-dropdown" aria-label="Account options">
                   <div className="navbar-account-dropdown-header">Switch Account</div>
                   <div className="navbar-account-list">
                     {savedAccounts.map((account) => {

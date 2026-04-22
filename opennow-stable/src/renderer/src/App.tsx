@@ -1686,18 +1686,20 @@ export function App(): JSX.Element {
     return accounts;
   }, []);
 
-  const refreshNavbarActiveSession = useCallback(async (): Promise<void> => {
-    if (!authSession) {
+  const refreshNavbarActiveSession = useCallback(async (sessionOverride?: AuthSession | null): Promise<void> => {
+    const session = sessionOverride ?? authSession;
+    if (!session) {
       setNavbarActiveSession(null);
       return;
     }
-    const token = authSession.tokens.idToken ?? authSession.tokens.accessToken;
-    if (!token || !effectiveStreamingBaseUrl) {
+    const token = session.tokens.idToken ?? session.tokens.accessToken;
+    const streamingBaseUrl = sessionOverride?.provider.streamingServiceUrl ?? effectiveStreamingBaseUrl;
+    if (!token || !streamingBaseUrl) {
       setNavbarActiveSession(null);
       return;
     }
     try {
-      const activeSessions = await window.openNow.getActiveSessions(token, effectiveStreamingBaseUrl);
+      const activeSessions = await window.openNow.getActiveSessions(token, streamingBaseUrl);
       const candidate = activeSessions.find((entry) => entry.status === 3 || entry.status === 2) ?? null;
       setNavbarActiveSession(candidate);
     } catch (error) {
@@ -2326,6 +2328,21 @@ export function App(): JSX.Element {
     applyVariantSelections(catalogResult.games);
   }, [applyVariantSelections]);
 
+  const clearSessionScopedState = useCallback((): void => {
+    setRegions([]);
+    setGames([]);
+    setLibraryGames([]);
+    setSubscriptionInfo(null);
+    setCatalogFilterGroups([]);
+    setCatalogSortOptions([]);
+    setCatalogTotalCount(0);
+    setCatalogSupportedCount(0);
+    setSelectedGameId("");
+    setNavbarActiveSession(null);
+    setIsResumingNavbarSession(false);
+    setIsTerminatingNavbarSession(false);
+  }, []);
+
   async function loadSessionRuntimeData(session: AuthSession): Promise<void> {
     const token = session.tokens.idToken ?? session.tokens.accessToken;
     const discovered = await window.openNow.getRegions({ token });
@@ -2390,15 +2407,23 @@ export function App(): JSX.Element {
       setProviderIdpId(session.provider.idpId);
       await refreshSavedAccounts();
       await loadSessionRuntimeData(session);
-      await refreshNavbarActiveSession();
+      await refreshNavbarActiveSession(session);
     } catch (error) {
       console.warn("Failed to switch account:", error);
       setLoginError(error instanceof Error ? error.message : "Failed to switch account");
       await refreshSavedAccounts();
       const sessionResult = await window.openNow.getAuthSession();
-      setAuthSession(sessionResult.session);
+      const recoveredSession = sessionResult.session;
+      setAuthSession(recoveredSession);
+      if (recoveredSession) {
+        setProviderIdpId(recoveredSession.provider.idpId);
+        await loadSessionRuntimeData(recoveredSession);
+        await refreshNavbarActiveSession(recoveredSession);
+      } else {
+        clearSessionScopedState();
+      }
     }
-  }, [loadSessionRuntimeData, refreshNavbarActiveSession, refreshSavedAccounts]);
+  }, [clearSessionScopedState, loadSessionRuntimeData, refreshNavbarActiveSession, refreshSavedAccounts]);
 
   const handleRemoveAccount = useCallback((userId: string) => {
     setAccountToRemove(userId);
@@ -2423,15 +2448,8 @@ export function App(): JSX.Element {
       await loadSessionRuntimeData(sessionResult.session);
       return;
     }
-    setRegions([]);
-    setGames([]);
-    setLibraryGames([]);
-    setSubscriptionInfo(null);
-    setCatalogFilterGroups([]);
-    setCatalogSortOptions([]);
-    setCatalogTotalCount(0);
-    setCatalogSupportedCount(0);
-  }, [accountToRemove, loadSessionRuntimeData]);
+    clearSessionScopedState();
+  }, [accountToRemove, clearSessionScopedState, loadSessionRuntimeData]);
 
   const handleAddAccount = useCallback(() => {
     setAuthSession(null);
